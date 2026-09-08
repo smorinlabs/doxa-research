@@ -946,9 +946,9 @@ def test_temperature_dropped_when_reasoning_effort_raised() -> None:
     assert "temperature" not in captured
 
 
-def test_sol_defaults_to_high_reasoning_effort() -> None:
-    """The API default is "medium"; research work asks for more explicitly."""
-    assert _capture_sol_request()["reasoning"]["effort"] == "high"
+def test_sol_defaults_to_max_reasoning_effort() -> None:
+    """The API default is "medium"; owner decision of 2026-09-08 sets "max"."""
+    assert _capture_sol_request()["reasoning"]["effort"] == "max"
 
 
 def test_sol_reasoning_effort_is_overridable() -> None:

@@ -395,10 +395,14 @@ class OpenAIProvider(ResearchProvider):
         # Reasoning effort is a gpt-5.6 capability the retired deep-research
         # models did not expose. Their research depth came from the specialised
         # model itself; on a general-purpose replacement it must be asked for.
-        # OpenAI documents the default as "medium"; research work wants more.
+        # OpenAI documents the default as "medium"; owner decision of
+        # 2026-09-08 sets "max", the top of the none/low/medium/high/xhigh/max
+        # scale, for background research. Verified accepted by gpt-5.6-sol the
+        # same day. This is the most expensive setting and no medium-vs-max
+        # quality comparison has been run; override per mode to lower it.
         reasoning: dict[str, Any] = {"summary": "auto"}
         effort = self._resolve_provider_config_value(
-            "reasoning_effort", "high" if self.model in BACKGROUND_MODELS else None
+            "reasoning_effort", "max" if self.model in BACKGROUND_MODELS else None
         )
         if effort is not None:
             reasoning["effort"] = effort

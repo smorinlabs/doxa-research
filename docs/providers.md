@@ -68,8 +68,11 @@ Doxa Research ships these OpenAI models in its built-in catalog:
   2026-07-23. Because it is general-purpose rather than a research-first
   agent, Doxa supplies the research behaviour those models had built in: the
   `web_search` tool, `tool_choice = {type = "web_search"}` so the model cannot
-  answer without searching, and `reasoning_effort = "high"` (the API default
-  is `medium`). Setting `web_search = false` on a mode omits the tool and the
+  answer without searching, and `reasoning_effort = "max"` — the top of the
+  `none`/`low`/`medium`/`high`/`xhigh`/`max` scale, where the API's own default
+  is `medium`. This buys the deepest available research and is correspondingly
+  the most expensive setting; no measured `medium`-versus-`max` quality
+  comparison exists, so set `reasoning_effort` on a mode to lower it. Setting `web_search = false` on a mode omits the tool and the
   default choice, for modes that synthesise from supplied material; an
   explicitly configured `tool_choice` is still sent. `quick_research` has no
   cheaper replacement model and no default tool-call cap; set `max_tool_calls`
