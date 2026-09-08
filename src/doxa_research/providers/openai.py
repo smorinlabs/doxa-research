@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import warnings
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -19,6 +19,7 @@ from tenacity import (
 )
 
 from doxa_research.config import (
+    BACKGROUND_MODELS,
     is_background_model,
     requires_background_submission,
     supports_temperature,
@@ -232,12 +233,28 @@ def _map_openai_error(
     return ProviderError(_PROVIDER_NAME_OPENAI, str(exc), raw_error=raw)
 
 
-def _is_retired(shutdown_date: str | None) -> bool:
-    """True if `shutdown_date` (YYYY-MM-DD) is today or in the past."""
+def _is_retired(shutdown_date: object) -> bool:
+    """True if `shutdown_date` is today (UTC) or in the past.
+
+    Accepts the shapes the SDK may plausibly return: a "YYYY-MM-DD" string, a
+    full ISO timestamp such as "2026-07-23T00:00:00Z", a `date`, or a
+    `datetime`. A parse failure returns False, which reports the model as
+    ordinary rather than falsely retired.
+
+    Compares against UTC rather than local time so the boundary day is not
+    misclassified by up to a day depending on where the caller sits.
+    """
     if not shutdown_date:
         return False
+    if isinstance(shutdown_date, datetime):
+        return shutdown_date.date() <= datetime.now(UTC).date()
+    if isinstance(shutdown_date, date):
+        return shutdown_date <= datetime.now(UTC).date()
+    if not isinstance(shutdown_date, str):
+        return False
+    text = shutdown_date.strip().replace("Z", "+00:00")
     try:
-        return date.fromisoformat(shutdown_date) <= date.today()
+        return date.fromisoformat(text[:10]) <= datetime.now(UTC).date()
     except (TypeError, ValueError):
         return False
 
@@ -381,7 +398,7 @@ class OpenAIProvider(ResearchProvider):
         # OpenAI documents the default as "medium"; research work wants more.
         reasoning: dict[str, Any] = {"summary": "auto"}
         effort = self._resolve_provider_config_value(
-            "reasoning_effort", "high" if is_background_model(self.model) else None
+            "reasoning_effort", "high" if self.model in BACKGROUND_MODELS else None
         )
         if effort is not None:
             reasoning["effort"] = effort
@@ -404,10 +421,11 @@ class OpenAIProvider(ResearchProvider):
         # by any tool, so a calculation alone would meet it and the answer
         # could still be ungrounded.
         tool_types = {t["type"] for t in tools}
-        if "web_search" in tool_types and is_background_model(self.model):
-            request_params["tool_choice"] = self._resolve_provider_config_value(
-                "tool_choice", {"type": "web_search"}
-            )
+        explicit_choice = self._resolve_provider_config_value("tool_choice")
+        if explicit_choice is not None:
+            request_params["tool_choice"] = explicit_choice
+        elif "web_search" in tool_types and self.model in BACKGROUND_MODELS:
+            request_params["tool_choice"] = {"type": "web_search"}
 
         # Only add temperature for models that support it. Reasoning models
         # (o-series) and the gpt-5 family both reject it: gpt-5.6-sol returns
@@ -582,7 +600,10 @@ class OpenAIProvider(ResearchProvider):
     ):
         """Yield text/reasoning/citation/done events from the OpenAI Responses streaming API.
 
-        P18 Phase E: only legal for non-background (immediate-kind) models.
+        P18 Phase E: refused only for models that have no synchronous mode at
+        all (see `requires_background_submission`) — the retired o3/o4-mini
+        deep-research models. gpt-5.6-sol defaults to background research but
+        streams fine, so it is allowed here.
         Background models require server-side async submission and don't
         stream tokens. The `_validate_kind_for_model` runtime check upstream
         catches the mismatch; this method is defense-in-depth.
@@ -639,9 +660,9 @@ class OpenAIProvider(ResearchProvider):
             request_params["reasoning"] = stream_reasoning
         if self._resolve_provider_config_value("web_search", False):
             request_params["tools"] = [{"type": "web_search"}]
-            stream_tool_choice = self._resolve_provider_config_value("tool_choice")
-            if stream_tool_choice is not None:
-                request_params["tool_choice"] = stream_tool_choice
+        stream_tool_choice = self._resolve_provider_config_value("tool_choice")
+        if stream_tool_choice is not None:
+            request_params["tool_choice"] = stream_tool_choice
         # Same effort-aware capability test as submit().
         if supports_temperature(self.model, stream_effort):
             request_params["temperature"] = self._resolve_provider_config_value("temperature", 0.7)
@@ -817,6 +838,7 @@ class OpenAIProvider(ResearchProvider):
                 "description": "Standard response model for general tasks",
                 "created": 1719500000,  # Approximate timestamp
                 "owned_by": _PROVIDER_NAME_OPENAI,
+                "shutdown_date": None,
             },
             {
                 "id": "gpt-5.6-sol",
@@ -828,6 +850,7 @@ class OpenAIProvider(ResearchProvider):
                 ),
                 "created": 1782228018,
                 "owned_by": _PROVIDER_NAME_OPENAI,
+                "shutdown_date": None,
             },
         ]
 
@@ -838,7 +861,7 @@ class OpenAIProvider(ResearchProvider):
             for model in response.data:
                 # Include all models without filtering
                 # Don't duplicate the response models we already added
-                if model.id not in ["o3", "gpt-5.6-sol"]:
+                if model.id not in ["o3", "gpt-5.6-sol", "gpt-5.6"]:
                     # `/v1/models` lists retired models too, carrying a past
                     # `shutdown_date`. Discarding that field is what let the
                     # o3/o4-mini shutdown stay invisible: the IDs still appear,

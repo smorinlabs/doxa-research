@@ -764,10 +764,22 @@ async def providers_command(
                 table.add_column("Model ID", style="cyan", width=model_id_width)
                 table.add_column("Created", style="green", width=14)
                 table.add_column("Owned By", style="yellow", width=16)
+                table.add_column("Status", style="red", width=22)
 
                 for model in models:
                     created_date = datetime.fromtimestamp(model["created"]).strftime("%Y-%m-%d")
-                    table.add_row(model["id"], created_date, model["owned_by"])
+                    # `/v1/models` keeps listing retired models, so an ID
+                    # appearing here does not mean it is callable. Say so:
+                    # the o3/o4-mini deep-research shutdown was invisible
+                    # precisely because the listing looked normal.
+                    shutdown = model.get("shutdown_date")
+                    if model.get("type") == "retired":
+                        status = f"retired {shutdown}"
+                    elif shutdown:
+                        status = f"retires {shutdown}"
+                    else:
+                        status = ""
+                    table.add_row(model["id"], created_date, model["owned_by"], status)
             elif provider_name == "perplexity":
                 table = Table(title="Perplexity Models", box=box.ROUNDED)
                 table.add_column("Model ID", style="cyan", width=model_id_width)

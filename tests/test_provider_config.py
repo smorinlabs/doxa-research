@@ -851,7 +851,10 @@ def test_quick_research_has_no_invented_tool_call_cap() -> None:
 
     mode = BUILTIN_MODES["quick_research"]
     assert "max_tool_calls" not in mode
-    assert "openai" not in mode
+    # Both placements: a flat key and a namespaced one each override a limit
+    # the user set on the mode, so neither may carry a default.
+    openai_ns = mode.get("openai")
+    assert not isinstance(openai_ns, dict) or "max_tool_calls" not in openai_ns
 
 
 def _capture_stream_request(config_extra: dict[str, Any], model: str = "o3") -> dict[str, Any]:
@@ -951,3 +954,112 @@ def test_sol_defaults_to_high_reasoning_effort() -> None:
 def test_sol_reasoning_effort_is_overridable() -> None:
     captured = _capture_sol_request({"reasoning_effort": "xhigh"})
     assert captured["reasoning"]["effort"] == "xhigh"
+
+
+# --- second-review findings: defaults must not leak onto retired models -----
+
+
+def test_retired_deep_research_model_gets_no_new_defaults() -> None:
+    """gpt-5.6 defaults must not reach o3-deep-research.
+
+    `is_background_model()` is still true for it via the substring rule, but
+    that model never exposed reasoning effort. Keying the defaults on the
+    registry instead of the substring keeps the old request shape for it.
+    """
+    captured: dict[str, Any] = {}
+
+    async def fake_create(*args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return types.SimpleNamespace(id="job-retired")
+
+    provider = OpenAIProvider(api_key="dummy", config={"model": "o3-deep-research"})
+    provider.client = cast(
+        Any, types.SimpleNamespace(responses=types.SimpleNamespace(create=fake_create))
+    )
+    asyncio.run(provider.submit("test prompt", mode="deep_research"))
+    assert "effort" not in captured["reasoning"]
+    assert "tool_choice" not in captured
+
+
+def test_explicit_tool_choice_survives_web_search_disabled() -> None:
+    """Only the default is conditioned on web search being present."""
+    captured = _capture_sol_request(
+        {"web_search": False, "tool_choice": {"type": "code_interpreter"}}
+    )
+    assert captured["tool_choice"] == {"type": "code_interpreter"}
+
+
+def test_stream_explicit_tool_choice_survives_without_web_search() -> None:
+    captured = _capture_stream_request({"tool_choice": "required"}, model="gpt-5.4")
+    assert captured["tool_choice"] == "required"
+
+
+def test_stream_sends_temperature_when_supported() -> None:
+    """Positive control: the stream guard must not omit temperature always."""
+    captured = _capture_stream_request({"temperature": 0.3}, model="gpt-4o")
+    assert captured["temperature"] == 0.3
+
+
+def test_sol_streams_without_raising() -> None:
+    """The headline fix, asserted behaviourally rather than via the predicate."""
+    captured = _capture_stream_request({"web_search": True}, model="gpt-5.6-sol")
+    assert captured["model"] == "gpt-5.6-sol"
+
+
+def test_true_deep_research_model_still_refuses_to_stream() -> None:
+    provider = OpenAIProvider(api_key="dummy", config={"model": "o3-deep-research"})
+
+    async def _drain() -> None:
+        async for _ in provider.stream("p", mode="quick"):
+            pass
+
+    with pytest.raises(NotImplementedError):
+        asyncio.run(_drain())
+
+
+def test_immediate_kind_with_sol_does_not_raise() -> None:
+    """Registering Sol as background must not make immediate use a config error."""
+    provider = OpenAIProvider(api_key="dummy", config={"model": "gpt-5.6-sol", "kind": "immediate"})
+    provider._validate_kind_for_model("some_mode")  # must not raise
+
+
+def test_list_models_marks_retired_entries() -> None:
+    """The listing must say a model is dead; that is the whole point.
+
+    `/v1/models` keeps returning retired IDs, which is why the o3/o4-mini
+    shutdown was invisible.
+    """
+
+    async def fake_list() -> object:
+        return types.SimpleNamespace(
+            data=[
+                types.SimpleNamespace(
+                    id="o3-deep-research",
+                    created=1719500001,
+                    owned_by="system",
+                    shutdown_date="2026-07-23",
+                ),
+                types.SimpleNamespace(
+                    id="gpt-4o", created=1719500002, owned_by="system", shutdown_date=None
+                ),
+            ]
+        )
+
+    provider = OpenAIProvider(api_key="dummy", config={"model": "gpt-5.6-sol"})
+    provider.client = cast(Any, types.SimpleNamespace(models=types.SimpleNamespace(list=fake_list)))
+    models = asyncio.run(provider.list_models())
+    by_id = {m["id"]: m for m in models}
+    assert by_id["o3-deep-research"]["type"] == "retired"
+    assert by_id["o3-deep-research"]["shutdown_date"] == "2026-07-23"
+    assert by_id["gpt-4o"]["type"] == "unknown"
+    # Every row carries the key, so consumers need no defensive .get().
+    assert all("shutdown_date" in m for m in models)
+
+
+def test_provider_scope_accepts_structured_tool_choice_and_summary() -> None:
+    """Provider scope and mode scope must accept the same shapes."""
+    from doxa_research.config_schema import OpenAIConfig
+
+    cfg = OpenAIConfig(api_key="k", tool_choice={"type": "web_search"}, reasoning_summary="auto")
+    assert cfg.tool_choice == {"type": "web_search"}
+    assert cfg.reasoning_summary == "auto"

@@ -47,8 +47,11 @@ api_key = "${OPENAI_API_KEY}"  # API key (required)
 model = "o3"                    # Model to use (default: o3 for general modes)
 timeout = 30.0                  # Request timeout in seconds (default: 30.0)
 temperature = 0.7               # Creativity/randomness, 0.0–2.0. Omitted automatically where
-                                # unsupported: o-series models, gpt-5/5.5/5.6-*/gpt-6-astra, and
-                                # any request whose reasoning_effort is above "none".
+                                # unsupported: o-series (o1/o3/o4-…) models, the specific IDs in
+                                # NO_TEMPERATURE_MODELS (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.5,
+                                # gpt-5.6/-sol/-luna/-terra, gpt-6-astra), and any request whose
+                                # reasoning_effort is low/medium/high/xhigh/max. gpt-5.1, gpt-5.2
+                                # and gpt-5.4 DO accept it at effort "none" or with no effort set.
 max_tokens = 4000               # Maximum response tokens (default: 4000)
 ```
 
@@ -66,14 +69,26 @@ Doxa Research ships these OpenAI models in its built-in catalog:
   agent, Doxa supplies the research behaviour those models had built in: the
   `web_search` tool, `tool_choice = {type = "web_search"}` so the model cannot
   answer without searching, and `reasoning_effort = "high"` (the API default
-  is `medium`). Setting `web_search = false` on a mode omits both, for modes
-  that synthesise from supplied material. `quick_research` has no cheaper
-  replacement model and no default tool-call cap; set `max_tool_calls`
+  is `medium`). Setting `web_search = false` on a mode omits the tool and the
+  default choice, for modes that synthesise from supplied material; an
+  explicitly configured `tool_choice` is still sent. `quick_research` has no
+  cheaper replacement model and no default tool-call cap; set `max_tool_calls`
   yourself to bound its cost.
+
+> **These defaults apply to background submission only.** A `kind = "immediate"`
+> mode goes through the streaming path, which defaults to no reasoning effort
+> (so the API's own `medium`), no forced `tool_choice`, no `code_interpreter`,
+> and `web_search = false`. Values you set explicitly — `reasoning_effort`,
+> `tool_choice`, `temperature`, `web_search` — are honoured on both paths; only
+> the defaults differ. If you want research-grade depth from an immediate mode,
+> set those keys yourself rather than relying on the background defaults.
 
 Run `doxa providers models -P openai` to list models live from the API
 (includes any additional models your OpenAI account exposes — Doxa will
-accept them but the built-in modes are tuned for the three above).
+accept them but the built-in modes are tuned for the models above). Retired
+models keep appearing in that listing, so the table marks them: a `Status` of
+`retired <date>` means the ID resolves in the catalogue but every call to it
+fails with `model_not_found`.
 
 ### CLI options
 

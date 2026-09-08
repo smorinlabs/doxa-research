@@ -224,6 +224,7 @@ class OpenAIConfig(ProviderConfigBase):
     # {"type": "web_search"} — the shape the request builder actually sends.
     tool_choice: str | dict[str, Any] | None = None
     web_search: bool | None = None
+    reasoning_summary: str | None = None
 
 
 class PerplexityConfig(ProviderConfigBase):

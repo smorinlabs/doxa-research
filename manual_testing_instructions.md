@@ -329,11 +329,14 @@ echo "exit=$?"
 ### M. ModeKindMismatchError fast-fail
 
 ```bash
-# M1. Immediate kind + deep-research model -> rejected before any API call
-uv run doxa-research ask "test" --mode quick_research --model gpt-5.6-sol --provider mock 2>&1 | head -8
+# M1. Immediate kind + a model with no synchronous mode -> rejected before any API call.
+# Must use a *-deep-research model: gpt-5.6-sol defaults to background research
+# but streams, so it can never mismatch. Uses the openai provider because the
+# mock provider performs no kind validation.
+uv run doxa-research ask "test" --mode openai_quick --model o3-deep-research --provider openai 2>&1 | head -8
 echo "exit=$?"
-# Expected: ModeKindMismatchError mentioning [modes.quick_research],
-#           the declared kind ("background"), the required kind ("background"),
+# Expected: ModeKindMismatchError mentioning [modes.openai_quick],
+#           the declared kind ("immediate"), the required kind ("background"),
 #           and a suggestion to either drop --model or change kind.
 # Expected exit: non-zero.
 

@@ -15,6 +15,7 @@ Precedence (lowest → highest): defaults → user TOML → project TOML → env
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -418,6 +419,26 @@ NO_TEMPERATURE_MODELS: frozenset[str] = frozenset(
 )
 
 
+#: Reasoning-effort values above "none". Only these suppress `temperature`;
+#: "none" and any unrecognised value leave it in place. Verified live
+#: 2026-09-08 that gpt-5.2 rejects temperature at "low", "medium" and "high",
+#: and accepts it at "none" or with no reasoning block.
+RAISED_REASONING_EFFORTS: frozenset[str] = frozenset({"low", "medium", "high", "xhigh", "max"})
+
+_O_SERIES_RE = re.compile(r"^o\d")
+
+
+def _is_o_series(model: str) -> bool:
+    r"""True for OpenAI reasoning models named o1/o3/o4-mini and friends.
+
+    Matches `^o\d` rather than a bare "o" prefix, which also caught unrelated
+    names such as "omni-1" and "openai-foo" and wrongly dropped their
+    temperature. Case-sensitive by design: provider model IDs are lowercase,
+    so "O3" is not a real ID and would fail as `model_not_found` regardless.
+    """
+    return bool(_O_SERIES_RE.match(model))
+
+
 def requires_background_submission(model: str | None) -> bool:
     """Return True if `model` *cannot* run on the immediate/streaming path.
 
@@ -453,13 +474,18 @@ def supports_temperature(model: str | None, reasoning_effort: str | None = None)
     "Unsupported parameter: 'temperature' is not supported with this model",
     which is diagnosable, whereas silently discarding a configured temperature
     changes sampling with no signal. The rejection surfaces only on a real
-    call; a validation probe with empty input short-circuits before the
+    call against the live API; a request with empty `input` short-circuits on
+    the missing input before reaching the
     compatibility check.
     """
     name = model or ""
-    if name.startswith("o") or name in NO_TEMPERATURE_MODELS:
+    if _is_o_series(name) or name in NO_TEMPERATURE_MODELS:
         return False
-    return reasoning_effort in (None, "none")
+    # Only a *recognised, raised* effort suppresses temperature. An
+    # unrecognised value (a typo, or an empty string) must not silently change
+    # sampling: leaving temperature in place lets the API reject the bad
+    # effort loudly, which is the diagnosable failure.
+    return reasoning_effort not in RAISED_REASONING_EFFORTS
 
 
 def mode_kind(mode_config: dict[str, Any]) -> str:

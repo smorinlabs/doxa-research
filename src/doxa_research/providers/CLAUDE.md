@@ -141,10 +141,10 @@ intentional, not consolidation drift.
 |---|---|
 | **SDK** | Official `openai` Python SDK. Auth-key URL: `https://platform.openai.com/api-keys`. |
 | **Background path** | `client.responses.create(model=..., input=..., background=True)` returns `resp_*` ID. Poll via `client.responses.retrieve(id)`. |
-| **Models** | `gpt-5.6-sol` (background, via `BACKGROUND_MODELS`). Standard chat models (immediate). |
+| **Models** | `gpt-5.6-sol` — defaults to background research via `BACKGROUND_MODELS`, but also streams; only `requires_background_submission()` models (the retired `*-deep-research` IDs) are refused on the immediate path. Standard chat models (immediate). |
 | **Error hierarchy** | Public via `openai.<ErrorClass>` (`AuthenticationError`, `RateLimitError`, etc.). No private-module quirk. |
 | **Citations** | On response output annotations. See `openai.py` `_render_sources` and the annotation extraction loop. |
-| **Mode-config support** | `max_tool_calls`, `code_interpreter`, `organization` all consumed. |
+| **Mode-config support** | `max_tool_calls`, `code_interpreter`, `organization`, `reasoning_effort`, `tool_choice`, `web_search`, `reasoning_summary` all consumed. Note `submit()` and `stream()` default differently — see the divergence note below. |
 | **Polling cadence** | 30s default (P26). |
 
 ## Perplexity (`perplexity.py`)
