@@ -12,6 +12,7 @@ and the thinking-budget knob.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import re
 import time
 import uuid
@@ -21,20 +22,6 @@ from urllib.parse import urlparse
 
 import httpx
 from google.genai import errors as genai_errors
-
-# DR-specific exceptions live in a PRIVATE module (google.genai._interactions)
-# that does NOT inherit from google.genai.errors.APIError. Try-import so we
-# fail loudly today and degrade gracefully if the SDK ever renames the module.
-try:
-    from google.genai._interactions import (
-        GeminiNextGenAPIClientError as _InteractionsAPIError,
-    )
-
-    _HAS_INTERACTIONS_ERRORS = True
-except ImportError:  # pragma: no cover
-    _HAS_INTERACTIONS_ERRORS = False
-    _InteractionsAPIError = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
-
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from doxa_research.config import is_background_model
@@ -53,6 +40,25 @@ from doxa_research.providers._helpers import (
     render_sources_block,
 )
 from doxa_research.providers.base import Citation, ResearchProvider, StreamEvent
+
+# DR-specific exceptions live in a PRIVATE SDK module that does NOT inherit
+# from google.genai.errors.APIError. Its path moved in google-genai 2.0:
+# 1.x exposed google.genai._interactions, 2.x exposes
+# google.genai._gaos.lib.compat_errors. Resolve newest-first so we fail loudly
+# today, and degrade gracefully if it moves again — _is_interactions_error()
+# keeps a duck-type fallback for exactly that case.
+_INTERACTIONS_ERROR_MODULES = (
+    "google.genai._gaos.lib.compat_errors",
+    "google.genai._interactions",
+)
+_InteractionsAPIError: Any = None
+for _module_name in _INTERACTIONS_ERROR_MODULES:
+    try:
+        _InteractionsAPIError = importlib.import_module(_module_name).GeminiNextGenAPIClientError
+        break
+    except (ImportError, AttributeError):  # pragma: no cover
+        continue
+_HAS_INTERACTIONS_ERRORS = _InteractionsAPIError is not None
 
 _PROVIDER_NAME_GEMINI = "gemini"
 

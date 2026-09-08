@@ -81,7 +81,7 @@ try-import + duck-type fallback predicate at module top:
 
 ```python
 try:
-    from google.genai._interactions import GeminiNextGenAPIClientError as _IExc
+    from google.genai._gaos.lib.compat_errors import GeminiNextGenAPIClientError as _IExc
     _HAS_IEXC = True
 except ImportError:
     _HAS_IEXC = False
@@ -168,14 +168,18 @@ non-obvious quirks.
 
 | Topic | Notes |
 |---|---|
-| **SDK package** | `google-genai>=1.74.0`. Auth-key URL: `https://aistudio.google.com/app/apikey`. Tier: paid Tier 1+ required for Deep Research. |
+| **SDK package** | `google-genai>=2.0.0` (2.x required: Google retired the legacy Interactions schema, so 1.x fails every Deep Research call at create time). Auth-key URL: `https://aistudio.google.com/app/apikey`. Tier: paid Tier 1+ required for Deep Research. |
 | **Immediate path** | `client.aio.models.generate_content[_stream](model=..., contents=..., config=...)`. P24's territory. |
 | **Background path (Deep Research)** | `client.aio.interactions.create(agent=..., input=..., background=True, store=True)`. P28's territory. ASYNC-ONLY surface (no sync equivalent). |
 | **Hybrid class** | `GeminiProvider` routes between immediate and DR based on `is_background_model(self.model)`. See "Hybrid routing" section above. |
 
 ### Deep Research exception hierarchy (PRIVATE MODULE)
 
-DR exceptions live in **private** module `google.genai._interactions`:
+DR exceptions live in a **private** SDK module whose path moved in
+google-genai 2.0: 1.x used `google.genai._interactions`, 2.x uses
+`google.genai._gaos.lib.compat_errors`. `gemini.py` resolves it newest-first
+and `_is_interactions_error()` keeps a duck-type fallback, so a further move
+degrades classification instead of breaking the import:
 
 ```
 GeminiNextGenAPIClientError  <-  Exception   (NOT inherited from google.genai.errors.APIError)

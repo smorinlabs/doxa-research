@@ -38,7 +38,9 @@ dependencies = [
     "prompt-toolkit>=3.0",
     "tomlkit>=0.13",
     "thothspinner>=1.2.6",
-    "google-genai>=1.74.0",
+    # >=2.0.0: Google retired the legacy Interactions API schema, so 1.x now
+    # fails every Deep Research call with HTTP 400 telling you to upgrade.
+    "google-genai>=2.0.0",
     "pydantic>=2.12.5,<3",
 ]
 

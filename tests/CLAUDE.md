@@ -44,7 +44,9 @@ client do NOT have this restriction.
 
 Some provider SDKs use private exception modules with non-obvious
 constructors. For Gemini's Deep Research exceptions
-(`google.genai._interactions.{BadRequestError, NotFoundError, ...}`),
+(`{BadRequestError, NotFoundError, ...}`, resolved by the
+`_sdk_interactions_errors()` helper because the module path moved in
+google-genai 2.0),
 the signature is:
 
 ```python
