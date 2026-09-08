@@ -168,7 +168,7 @@ non-obvious quirks.
 
 | Topic | Notes |
 |---|---|
-| **SDK package** | `google-genai>=1.74.0`. Auth-key URL: `https://aistudio.google.com/app/apikey`. Tier: paid Tier 1+ required for Deep Research. |
+| **SDK package** | `google-genai>=2.0.0` (2.x required: Google retired the legacy Interactions schema, so 1.x fails every Deep Research call at create time). Auth-key URL: `https://aistudio.google.com/app/apikey`. Tier: paid Tier 1+ required for Deep Research. |
 | **Immediate path** | `client.aio.models.generate_content[_stream](model=..., contents=..., config=...)`. P24's territory. |
 | **Background path (Deep Research)** | `client.aio.interactions.create(agent=..., input=..., background=True, store=True)`. P28's territory. ASYNC-ONLY surface (no sync equivalent). |
 | **Hybrid class** | `GeminiProvider` routes between immediate and DR based on `is_background_model(self.model)`. See "Hybrid routing" section above. |
