@@ -2,6 +2,22 @@
 
 All notable changes to Doxa Research are documented here.
 
+## [3.2.1](https://github.com/smorinlabs/doxa-research/compare/v3.2.0...v3.2.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **gemini:** raise the standalone launcher's SDK floor too ([d0f85e4](https://github.com/smorinlabs/doxa-research/commit/d0f85e40e41bd2e17fd7e469591d51e298372552))
+* **gemini:** require google-genai&gt;=2.0.0 for the new Interactions schema ([2a0fa8f](https://github.com/smorinlabs/doxa-research/commit/2a0fa8ffe4ddb5360787c92eb6efb9fe7b6e0a1b))
+* **gemini:** require google-genai&gt;=2.0.0 for the new Interactions schema ([74497d8](https://github.com/smorinlabs/doxa-research/commit/74497d8c4a4d5aa6fabaf1db8ded032d3ca52718))
+
+
+### Documentation
+
+* --ff-only is the primary sync, --rebase the fallback ([8dd2c24](https://github.com/smorinlabs/doxa-research/commit/8dd2c243495fc927ca57a8a9158076a0c1c52078))
+* --ff-only is the primary sync, --rebase the fallback ([73dffd5](https://github.com/smorinlabs/doxa-research/commit/73dffd519b5133ddab983788864cb7bbb869c199))
+* **gemini:** correct the SDK floor in the providers guide ([7ddda8d](https://github.com/smorinlabs/doxa-research/commit/7ddda8dd0d47b5d57292da9965759836382304af))
+
 ## [3.2.0](https://github.com/smorinlabs/doxa-research/compare/v3.1.2...v3.2.0) (2026-07-19)
 
 

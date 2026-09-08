@@ -1,6 +1,6 @@
 [project]
 name = "doxa-research"
-version = "3.2.0"
+version = "3.2.1"
 description = "AI-Powered Research Assistant — orchestrates parallel LLM providers for comprehensive research reports"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
