@@ -330,7 +330,7 @@ echo "exit=$?"
 
 ```bash
 # M1. Immediate kind + deep-research model -> rejected before any API call
-uv run doxa-research ask "test" --mode quick_research --model o3-deep-research --provider mock 2>&1 | head -8
+uv run doxa-research ask "test" --mode quick_research --model gpt-5.6-sol --provider mock 2>&1 | head -8
 echo "exit=$?"
 # Expected: ModeKindMismatchError mentioning [modes.quick_research],
 #           the declared kind ("background"), the required kind ("background"),

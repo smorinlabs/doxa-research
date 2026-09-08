@@ -361,7 +361,7 @@ class ModelOverrideMultiProviderError(DoxaError):
             ),
             (
                 "Each provider in a multi-provider mode has its own per-provider "
-                "model (e.g. openai -> o3-deep-research, perplexity -> "
+                "model (e.g. openai -> gpt-5.6-sol, perplexity -> "
                 "sonar-deep-research, gemini -> deep-research-preview-04-2026). "
                 "Narrow to one provider first: --provider PROVIDER --model "
                 f"{model}. Or edit the mode's per-provider namespace model "
@@ -379,7 +379,7 @@ class ImmediateMultiProviderError(DoxaError):
         (e.g. gpt-4.1-mini, sonar, gemini-2.5-flash-lite). Built-ins:
         `openai_quick`, `perplexity_quick`, `gemini_quick`.
       * Deep Research models — long-running, background, support
-        multi-provider fan-out (e.g. o3-deep-research, sonar-deep-research,
+        multi-provider fan-out (e.g. gpt-5.6-sol, sonar-deep-research,
         deep-research-preview-04-2026). Built-in fan-out: `all_deep_research`.
 
     The two families are distinct upstream and cannot be mixed: an immediate
@@ -406,7 +406,7 @@ class ImmediateMultiProviderError(DoxaError):
                 "Built-ins: openai_quick, perplexity_quick, gemini_quick.\n"
                 "  - Deep Research models: long-running, background, "
                 "support multi-provider fan-out. Built-in: all_deep_research "
-                "(openai -> o3-deep-research, perplexity -> sonar-deep-research, "
+                "(openai -> gpt-5.6-sol, perplexity -> sonar-deep-research, "
                 "gemini -> deep-research-preview-04-2026).\n"
                 "To fan out across all three providers, use "
                 "`--mode all_deep_research`. To call one provider quickly, "

@@ -31,7 +31,7 @@ def _make_provider():
 
     return OpenAIProvider(
         api_key="sk-replay-dummy",
-        config={"model": "o4-mini-deep-research", "background": True},
+        config={"model": "gpt-5.6-sol", "background": True},
     )
 
 

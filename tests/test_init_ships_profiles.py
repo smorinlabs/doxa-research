@@ -108,7 +108,7 @@ def test_all_deep_research_mode_fans_out_with_per_provider_models() -> None:
     assert mode["kind"] == "background"
     assert mode["providers"] == ["openai", "perplexity", "gemini"]
     assert mode["parallel"] is True
-    assert mode["openai"]["model"] == "o3-deep-research"
+    assert mode["openai"]["model"] == "gpt-5.6-sol"
     assert mode["perplexity"]["model"] == "sonar-deep-research"
     assert mode["gemini"]["model"] == "deep-research-preview-04-2026"
 

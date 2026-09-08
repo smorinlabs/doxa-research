@@ -176,7 +176,7 @@ Generated: 2026-05-17T10:42:08.117244
 
 Paxos, Raft, and Viewstamped Replication (VR) are three foundational consensus
 protocols that achieve agreement among distributed nodes despite failures.
-[…3–8 pages of analysis from o3-deep-research, with inline citation anchors…]
+[…3–8 pages of analysis from gpt-5.6-sol, with inline citation anchors…]
 
 ### Sources
 - [Paxos Made Simple — Lamport (lamport.azurewebsites.net)](https://...)
@@ -219,10 +219,17 @@ The "Manual orchestration" column is what you'd build yourself by wiring the thr
 
 You pay each provider's API directly — Doxa does not add cost or take a cut. Rough per-run cost (subject to provider pricing changes; see each provider's pricing page for current rates):
 
+> **OpenAI cost changed with the 2026-07-23 deep-research shutdown.** There is
+> no longer a cheaper OpenAI research tier: `o4-mini-deep-research` ($2/$8 per
+> 1M input/output tokens) and `o3-deep-research` ($10/$40) were both replaced
+> by `gpt-5.6-sol` ($4/$20). Former `quick_research` users therefore pay more
+> per token, and former `deep_research` users less. Bound cost by setting
+> `max_tool_calls` and `reasoning_effort` explicitly; the figures below are not
+> measured against the new model.
+
 | Provider | Model | Typical cost per Deep Research run |
 |---|---|---|
-| OpenAI | `o3-deep-research` | $1–$8 (varies with depth and prompt complexity) |
-| OpenAI | `o4-mini-deep-research` | $0.30–$3 (cheaper tier) |
+| OpenAI | `gpt-5.6-sol` | $1–$8 (varies with depth and prompt complexity) |
 | Perplexity | `sonar-deep-research` | $0.05–$0.50 |
 | Gemini | `deep-research-preview-04-2026` | $1–$3 (preview pricing; paid Tier 1+ required) |
 | Gemini | `deep-research-max-preview-04-2026` | $3–$7 (max comprehensiveness) |
@@ -405,7 +412,7 @@ kind = "immediate"
 
 [modes.my_openai_reasoning.openai]
 reasoning_summary = "auto"
-web_search = false  # set true to enable web_search_preview
+web_search = false  # set true to enable web_search
 ```
 
 Background-kind modes (e.g. `deep_research`, `quick_research`,
@@ -776,7 +783,7 @@ For modes with system prompts:
 prompt: explain kubernetes
 mode: deep_research
 provider: openai
-model: o3-deep-research
+model: gpt-5.6-sol
 operation_id: research-20250802-154755-a38d159848984fa8
 created_at: 2025-08-02T15:47:55.468596
 ---

@@ -67,9 +67,7 @@ def test_code_interpreter_false_excludes_tool() -> None:
     assert "code_interpreter" not in tool_types, (
         f"code_interpreter should be absent when config sets it False, got tools: {tool_types}"
     )
-    assert "web_search_preview" in tool_types, (
-        f"web_search_preview must still be present, got tools: {tool_types}"
-    )
+    assert "web_search" in tool_types, f"web_search must still be present, got tools: {tool_types}"
 
 
 def test_default_config_includes_code_interpreter_and_omits_max_tool_calls() -> None:
@@ -464,7 +462,7 @@ def test_openai_stream_web_search_true_reaches_request_tools() -> None:
 
     captured = _capture_openai_stream_request(provider)
 
-    assert captured["tools"] == [{"type": "web_search_preview"}]
+    assert captured["tools"] == [{"type": "web_search"}]
 
 
 def test_openai_stream_web_search_false_omits_request_tools() -> None:
@@ -772,3 +770,90 @@ def test_root_providers_namespace_works_for_perplexity_and_gemini() -> None:
     with patch("google.genai.Client", return_value=mock_client):
         gemini_provider = create_provider("gemini", gemini_config)
     assert gemini_provider.config.get("temperature") == 0.4
+
+
+# --- gpt-5.6-sol migration (o3/o4-mini-deep-research retired 2026-07-23) ------
+
+
+def _capture_sol_request(config_extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Submit through a stubbed client and return the request kwargs."""
+    captured: dict[str, Any] = {}
+
+    async def fake_create(*args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return types.SimpleNamespace(id="job-sol")
+
+    cfg: dict[str, Any] = {"model": "gpt-5.6-sol"}
+    if config_extra:
+        cfg["openai"] = config_extra
+    provider = OpenAIProvider(api_key="dummy", config=cfg)
+    provider.client = cast(
+        Any, types.SimpleNamespace(responses=types.SimpleNamespace(create=fake_create))
+    )
+    asyncio.run(provider.submit("test prompt", mode="deep_research"))
+    return captured
+
+
+def test_sol_is_submitted_in_background_mode() -> None:
+    """gpt-5.6-sol carries no "deep-research" substring; the registry classifies it."""
+    assert _capture_sol_request()["background"] is True
+
+
+def test_sol_omits_temperature() -> None:
+    """The API rejects temperature for gpt-5.6-sol.
+
+    Verified live 2026-09-08: "Unsupported parameter: 'temperature' is not
+    supported with this model." The previous guard tested `startswith("o")`,
+    which let the gpt-5 family through.
+    """
+    assert "temperature" not in _capture_sol_request()
+
+
+def test_sol_uses_non_preview_web_search() -> None:
+    """web_search_preview ignores filters/return_token_budget; use web_search."""
+    tools = [t.get("type") for t in _capture_sol_request()["tools"]]
+    assert "web_search" in tools
+    assert "web_search_preview" not in tools
+
+
+def test_sol_requires_web_search_specifically_by_default() -> None:
+    """Sol is general-purpose and may skip search under tool_choice=auto.
+
+    Targets web search by name rather than "required": Code Interpreter is
+    enabled by default, so plain "required" is satisfied by a calculation and
+    would leave the answer ungrounded.
+    """
+    assert _capture_sol_request()["tool_choice"] == {"type": "web_search"}
+
+
+def test_sol_tool_choice_is_overridable() -> None:
+    assert _capture_sol_request({"tool_choice": "auto"})["tool_choice"] == "auto"
+
+
+def test_sol_web_search_false_omits_tool_and_choice() -> None:
+    """A mode that disables search must not have it forced back on.
+
+    `prd` and similar modes legitimately synthesise from supplied material.
+    """
+    captured = _capture_sol_request({"web_search": False})
+    assert "web_search" not in [t["type"] for t in captured["tools"]]
+    assert "tool_choice" not in captured
+
+
+def test_quick_research_has_no_invented_tool_call_cap() -> None:
+    """The cheap tier is gone; an invented default would override user limits."""
+    from doxa_research.config import BUILTIN_MODES
+
+    # The mode carries no openai namespace at all now, which is the invariant:
+    # any default here would win over limits users set on the mode.
+    assert "openai" not in BUILTIN_MODES["quick_research"]
+
+
+def test_sol_defaults_to_high_reasoning_effort() -> None:
+    """The API default is "medium"; research work asks for more explicitly."""
+    assert _capture_sol_request()["reasoning"]["effort"] == "high"
+
+
+def test_sol_reasoning_effort_is_overridable() -> None:
+    captured = _capture_sol_request({"reasoning_effort": "xhigh"})
+    assert captured["reasoning"]["effort"] == "xhigh"

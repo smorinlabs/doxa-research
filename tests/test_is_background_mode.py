@@ -75,3 +75,31 @@ def test_is_background_mode_truthy_async_is_background() -> None:
 def test_is_background_mode_falsy_async_is_immediate() -> None:
     assert is_background_mode({"async": 0, "model": "o3-deep-research"}) is False
     assert is_background_mode({"async": "", "model": "o3-deep-research"}) is False
+
+
+def test_is_background_model_gpt_5_6_sol_is_true() -> None:
+    """Registry entry: the replacement model's ID encodes no capability."""
+    assert is_background_model("gpt-5.6-sol") is True
+
+
+def test_is_background_model_other_gpt5_is_false() -> None:
+    """Only registered IDs qualify; the gpt-5 family at large does not."""
+    assert is_background_model("gpt-5.4") is False
+
+
+def test_supports_temperature_matrix() -> None:
+    """Verified live 2026-09-08; rejection does not follow the model family.
+
+    gpt-5 and gpt-5.5 reject temperature while gpt-5.1, gpt-5.2 and gpt-5.4
+    accept it, so no `gpt-5*` prefix rule is correct.
+    """
+    from doxa_research.config import supports_temperature
+
+    for accepts in ("gpt-4.1-mini", "gpt-4o", "gpt-5.1", "gpt-5.2", "gpt-5.4"):
+        assert supports_temperature(accepts) is True, accepts
+    for rejects in ("o3", "o1", "gpt-5", "gpt-5.5", "gpt-5.6-sol", "gpt-6-astra"):
+        assert supports_temperature(rejects) is False, rejects
+    # Unknown models default to sending it: a loud API error beats silently
+    # discarding a sampling setting the user configured.
+    assert supports_temperature("some-future-model") is True
+    assert supports_temperature(None) is True

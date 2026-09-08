@@ -141,7 +141,7 @@ intentional, not consolidation drift.
 |---|---|
 | **SDK** | Official `openai` Python SDK. Auth-key URL: `https://platform.openai.com/api-keys`. |
 | **Background path** | `client.responses.create(model=..., input=..., background=True)` returns `resp_*` ID. Poll via `client.responses.retrieve(id)`. |
-| **Models** | `o3-deep-research`, `o4-mini-deep-research` (background). Standard chat models (immediate). |
+| **Models** | `gpt-5.6-sol` (background, via `BACKGROUND_MODELS`). Standard chat models (immediate). |
 | **Error hierarchy** | Public via `openai.<ErrorClass>` (`AuthenticationError`, `RateLimitError`, etc.). No private-module quirk. |
 | **Citations** | On response output annotations. See `openai.py` `_render_sources` and the annotation extraction loop. |
 | **Mode-config support** | `max_tool_calls`, `code_interpreter`, `organization` all consumed. |
@@ -215,7 +215,8 @@ GeminiNextGenAPIClientError  <-  Exception   (NOT inherited from google.genai.er
 | **Layered citation rendering** | (1) parse SDK Sources block for `{redirect_url: domain_title}`. (2) Bounded-concurrency HEAD-follow each redirect URL to get source URL. (3) Title-derivation chain: `parsed_sources.get → urlparse(source).netloc → URL`. (4) Dedupe by final URL. See `_resolve_dr_redirects` in `gemini.py`. |
 | **Polling cadence and timeout** | Schema-only in v1: `[providers.gemini].poll_interval = 10` and `.max_wait_minutes = 60`. Runtime still reads `[execution].poll_interval` (default 30s) and `.max_wait` (default 30min). Set `[execution].max_wait = 60` for DR users (upstream hard limit is 60 min). v1.1 will wire the per-provider override. |
 | **Retention windows** | Paid tier: 55 days. Free tier: 1 day (but DR is paid-only). `interactions.get()` on expired ID → `NotFoundError(404)` → mapped to "interaction expired" message via `_map_gemini_error`. |
-| **`is_background_model("deep-research-...")` returns True** | Substring match on "deep-research" (see `config.py`). Covers all three DR agent IDs. |
+| **`is_background_model("deep-research-...")` returns True** | Substring match on "deep-research" (see `config.py`). Covers the Gemini DR agent IDs and `sonar-deep-research`. |
+| **`is_background_model("gpt-5.6-sol")` returns True** | Exact match against `BACKGROUND_MODELS` in `config.py`. OpenAI's replacement for the retired DR models encodes no capability in its ID, so the substring rule cannot classify it and every such model must be registered explicitly. |
 | **Pricing (preview)** | Fast tier $1-3/task, max tier $3-7/task. Free tier ineligible. |
 
 ### Cancel behavior (defensive)

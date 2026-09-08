@@ -219,6 +219,9 @@ class OpenAIConfig(ProviderConfigBase):
     max_tool_calls: int | None = None
     code_interpreter: bool | None = None
     background: bool | None = None
+    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] | None = None
+    tool_choice: str | None = None
+    web_search: bool | None = None
 
 
 class PerplexityConfig(ProviderConfigBase):

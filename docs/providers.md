@@ -46,7 +46,7 @@ All OpenAI settings can be configured in
 api_key = "${OPENAI_API_KEY}"  # API key (required)
 model = "o3"                    # Model to use (default: o3 for general modes)
 timeout = 30.0                  # Request timeout in seconds (default: 30.0)
-temperature = 0.7               # Creativity/randomness, 0.0–2.0 (ignored by o3/o3-deep-research)
+temperature = 0.7               # Creativity/randomness, 0.0–2.0 (rejected by o-series and gpt-5 models; omitted for them)
 max_tokens = 4000               # Maximum response tokens (default: 4000)
 ```
 
@@ -56,11 +56,18 @@ Doxa Research ships these OpenAI models in its built-in catalog:
 
 - `o3` — Reasoning model used by the `default`, `clarification`, and
   `openai_reasoning` modes.
-- `o3-deep-research` — Deep-research model used by the `deep_research`,
-  `exploration`, `deep_dive`, `tutorial`, `solution`, `prd`, and `tdd`
-  modes.
-- `o4-mini-deep-research` — Lower-cost deep-research variant used by the
-  `quick_research` mode.
+- `gpt-5.6-sol` — General-purpose flagship used for Deep Research by the
+  `deep_research`, `exploration`, `deep_dive`, `tutorial`, `solution`, `prd`,
+  `tdd`, `comparison`, and `quick_research` modes. It replaced
+  `o3-deep-research` and `o4-mini-deep-research`, which OpenAI shut down on
+  2026-07-23. Because it is general-purpose rather than a research-first
+  agent, Doxa supplies the research behaviour those models had built in: the
+  `web_search` tool, `tool_choice = {type = "web_search"}` so the model cannot
+  answer without searching, and `reasoning_effort = "high"` (the API default
+  is `medium`). Setting `web_search = false` on a mode omits both, for modes
+  that synthesise from supplied material. `quick_research` has no cheaper
+  replacement model and no default tool-call cap; set `max_tool_calls`
+  yourself to bound its cost.
 
 Run `doxa providers models -P openai` to list models live from the API
 (includes any additional models your OpenAI account exposes — Doxa will

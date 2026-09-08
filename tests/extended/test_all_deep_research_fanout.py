@@ -170,7 +170,7 @@ def test_all_deep_research_blocking_lifecycle_writes_three_files(
 
     # Each provider's output file must exist with the right model in frontmatter.
     expected_models = {
-        "openai": "o3-deep-research",
+        "openai": "gpt-5.6-sol",
         "perplexity": "sonar-deep-research",
         "gemini": "deep-research-preview-04-2026",
     }

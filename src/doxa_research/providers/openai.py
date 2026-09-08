@@ -18,7 +18,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from doxa_research.config import is_background_model
+from doxa_research.config import is_background_model, supports_temperature
 from doxa_research.errors import (
     APIKeyError,
     APIQuotaError,
@@ -181,7 +181,7 @@ def _map_openai_error(
             return ProviderError(
                 _PROVIDER_NAME_OPENAI,
                 f"Model '{model}' does not support temperature parameter. "
-                "This is likely a response model (o3, o3-deep-research, etc.)",
+                "This is likely a response model (o3, gpt-5.6-sol, etc.)",
                 raw_error=raw,
             )
         if "unsupported parameter" in msg_lower:
@@ -341,10 +341,15 @@ class OpenAIProvider(ResearchProvider):
 
         input_messages.append({"role": "user", "content": [{"type": "input_text", "text": prompt}]})
 
-        # Configure tools based on model type
+        # Configure tools based on model type.
+        # `web_search`, not the legacy `web_search_preview`: OpenAI's web-search
+        # migration table directs Responses integrations to the non-preview tool,
+        # which alone supports `filters`, `external_web_access` and
+        # `return_token_budget`. Preview is still accepted but ignores them.
         tools: list[dict[str, Any]] = []
         if is_background_model(self.model):
-            tools = [{"type": "web_search_preview"}]
+            if self._resolve_provider_config_value("web_search", True):
+                tools.append({"type": "web_search"})
             if self._resolve_provider_config_value("code_interpreter", True):
                 tools.append({"type": "code_interpreter", "container": {"type": "auto"}})
 
@@ -356,17 +361,45 @@ class OpenAIProvider(ResearchProvider):
         temperature = self._resolve_provider_config_value("temperature", 0.7)
 
         # Build request parameters
+        # Reasoning effort is a gpt-5.6 capability the retired deep-research
+        # models did not expose. Their research depth came from the specialised
+        # model itself; on a general-purpose replacement it must be asked for.
+        # OpenAI documents the default as "medium"; research work wants more.
+        reasoning: dict[str, Any] = {"summary": "auto"}
+        effort = self._resolve_provider_config_value(
+            "reasoning_effort", "high" if is_background_model(self.model) else None
+        )
+        if effort is not None:
+            reasoning["effort"] = effort
+
         request_params: dict[str, Any] = {
             "model": self.model,
             "input": input_messages,
-            "reasoning": {"summary": "auto"},  # Enable reasoning summaries
+            "reasoning": reasoning,
             "tools": tools,
             "background": use_background,
         }
 
-        # Only add temperature for models that support it
-        # Response models (o3, o3-deep-research, o4-mini-deep-research) don't support temperature
-        if not self.model.startswith("o"):
+        # The retired deep-research models always browsed. gpt-5.6-sol treats
+        # web search as an ordinary tool and under `tool_choice: "auto"` may
+        # answer from parametric memory instead — a silent loss of grounding
+        # for a research tool.
+        #
+        # Target web search specifically rather than "required": with Code
+        # Interpreter also enabled by default, plain "required" is satisfied
+        # by any tool, so a calculation alone would meet it and the answer
+        # could still be ungrounded.
+        tool_types = {t["type"] for t in tools}
+        if "web_search" in tool_types and is_background_model(self.model):
+            request_params["tool_choice"] = self._resolve_provider_config_value(
+                "tool_choice", {"type": "web_search"}
+            )
+
+        # Only add temperature for models that support it. Reasoning models
+        # (o-series) and the gpt-5 family both reject it: gpt-5.6-sol returns
+        # "Unsupported parameter: 'temperature' is not supported with this
+        # model." The old `startswith("o")` test passed gpt-5.6-sol through.
+        if supports_temperature(self.model):
             request_params["temperature"] = temperature
 
         # Apply max_tool_calls if configured — primary lever for cost and latency control
@@ -551,7 +584,7 @@ class OpenAIProvider(ResearchProvider):
 
         Request shape:
           [modes.X.openai].reasoning_summary enables reasoning summaries.
-          [modes.X.openai].web_search=true enables the web_search_preview tool.
+          [modes.X.openai].web_search=true enables the web_search tool.
           Web search is opt-in for user modes and enabled by the builtin
           openai_reasoning mode.
         """
@@ -582,9 +615,11 @@ class OpenAIProvider(ResearchProvider):
         if reasoning_summary is not None:
             request_params["reasoning"] = {"summary": reasoning_summary}
         if self._resolve_provider_config_value("web_search", False):
-            request_params["tools"] = [{"type": "web_search_preview"}]
+            request_params["tools"] = [{"type": "web_search"}]
         # o-series response models reject `temperature`; only set it on chat-style models
-        if not self.model.startswith("o"):
+        # Same capability test as submit(): the prefix rule sent temperature
+        # to every gpt-5 model, which gpt-5, gpt-5.5 and gpt-5.6-* reject.
+        if supports_temperature(self.model):
             request_params["temperature"] = self._resolve_provider_config_value("temperature", 0.7)
 
         try:
@@ -760,17 +795,14 @@ class OpenAIProvider(ResearchProvider):
                 "owned_by": _PROVIDER_NAME_OPENAI,
             },
             {
-                "id": "o3-deep-research",
+                "id": "gpt-5.6-sol",
                 "type": "deep_research",
-                "description": "Full deep research model with web search and code execution",
-                "created": 1719500001,
-                "owned_by": _PROVIDER_NAME_OPENAI,
-            },
-            {
-                "id": "o4-mini-deep-research",
-                "type": "deep_research",
-                "description": "Fast lightweight research model for quick answers",
-                "created": 1719500002,
+                "description": (
+                    "Deep research via the general-purpose gpt-5.6 flagship: web search "
+                    "and code execution, with research depth supplied by reasoning effort "
+                    "and instructions rather than by a specialised model"
+                ),
+                "created": 1782228018,
                 "owned_by": _PROVIDER_NAME_OPENAI,
             },
         ]
@@ -782,7 +814,7 @@ class OpenAIProvider(ResearchProvider):
             for model in response.data:
                 # Include all models without filtering
                 # Don't duplicate the response models we already added
-                if model.id not in ["o3", "o3-deep-research", "o4-mini-deep-research"]:
+                if model.id not in ["o3", "gpt-5.6-sol"]:
                     api_models.append(
                         {
                             "id": model.id,
