@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import warnings
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -18,7 +18,11 @@ from tenacity import (
     wait_exponential,
 )
 
-from doxa_research.config import is_background_model, supports_temperature
+from doxa_research.config import (
+    is_background_model,
+    requires_background_submission,
+    supports_temperature,
+)
 from doxa_research.errors import (
     APIKeyError,
     APIQuotaError,
@@ -228,6 +232,16 @@ def _map_openai_error(
     return ProviderError(_PROVIDER_NAME_OPENAI, str(exc), raw_error=raw)
 
 
+def _is_retired(shutdown_date: str | None) -> bool:
+    """True if `shutdown_date` (YYYY-MM-DD) is today or in the past."""
+    if not shutdown_date:
+        return False
+    try:
+        return date.fromisoformat(shutdown_date) <= date.today()
+    except (TypeError, ValueError):
+        return False
+
+
 class OpenAIProvider(ResearchProvider):
     """OpenAI Responses API implementation for Deep Research"""
 
@@ -294,7 +308,7 @@ class OpenAIProvider(ResearchProvider):
         §5.6 + §4 Q1.
         """
         declared = self.config.get("kind")
-        if declared == "immediate" and is_background_model(self.model):
+        if declared == "immediate" and requires_background_submission(self.model):
             raise ModeKindMismatchError(
                 mode_name=mode,
                 model=self.model,
@@ -399,7 +413,7 @@ class OpenAIProvider(ResearchProvider):
         # (o-series) and the gpt-5 family both reject it: gpt-5.6-sol returns
         # "Unsupported parameter: 'temperature' is not supported with this
         # model." The old `startswith("o")` test passed gpt-5.6-sol through.
-        if supports_temperature(self.model):
+        if supports_temperature(self.model, reasoning.get("effort")):
             request_params["temperature"] = temperature
 
         # Apply max_tool_calls if configured — primary lever for cost and latency control
@@ -591,7 +605,7 @@ class OpenAIProvider(ResearchProvider):
         from doxa_research.providers.base import StreamEvent
 
         self._validate_kind_for_model(mode)
-        if is_background_model(self.model):
+        if requires_background_submission(self.model):
             raise NotImplementedError(
                 f"OpenAIProvider.stream(): model {self.model!r} requires background "
                 f"submission; streaming is not supported. Use submit() + check_status() instead."
@@ -612,14 +626,24 @@ class OpenAIProvider(ResearchProvider):
             "input": input_messages,
         }
         reasoning_summary = self._resolve_provider_config_value("reasoning_summary")
-        if reasoning_summary is not None:
-            request_params["reasoning"] = {"summary": reasoning_summary}
+        # Explicit settings must survive both execution paths. Immediate and
+        # background may default differently, but a value the user actually
+        # configured is dropped by neither.
+        stream_effort = self._resolve_provider_config_value("reasoning_effort")
+        if reasoning_summary is not None or stream_effort is not None:
+            stream_reasoning: dict[str, Any] = {}
+            if reasoning_summary is not None:
+                stream_reasoning["summary"] = reasoning_summary
+            if stream_effort is not None:
+                stream_reasoning["effort"] = stream_effort
+            request_params["reasoning"] = stream_reasoning
         if self._resolve_provider_config_value("web_search", False):
             request_params["tools"] = [{"type": "web_search"}]
-        # o-series response models reject `temperature`; only set it on chat-style models
-        # Same capability test as submit(): the prefix rule sent temperature
-        # to every gpt-5 model, which gpt-5, gpt-5.5 and gpt-5.6-* reject.
-        if supports_temperature(self.model):
+            stream_tool_choice = self._resolve_provider_config_value("tool_choice")
+            if stream_tool_choice is not None:
+                request_params["tool_choice"] = stream_tool_choice
+        # Same effort-aware capability test as submit().
+        if supports_temperature(self.model, stream_effort):
             request_params["temperature"] = self._resolve_provider_config_value("temperature", 0.7)
 
         try:
@@ -815,12 +839,18 @@ class OpenAIProvider(ResearchProvider):
                 # Include all models without filtering
                 # Don't duplicate the response models we already added
                 if model.id not in ["o3", "gpt-5.6-sol"]:
+                    # `/v1/models` lists retired models too, carrying a past
+                    # `shutdown_date`. Discarding that field is what let the
+                    # o3/o4-mini shutdown stay invisible: the IDs still appear,
+                    # but every call returns `model_not_found`. Surface it.
+                    shutdown = getattr(model, "shutdown_date", None)
                     api_models.append(
                         {
                             "id": model.id,
                             "created": model.created,
                             "owned_by": model.owned_by,
-                            "type": "unknown",  # Mark type as unknown for unfiltered models
+                            "type": "retired" if _is_retired(shutdown) else "unknown",
+                            "shutdown_date": shutdown,
                         }
                     )
             # Combine and sort all models

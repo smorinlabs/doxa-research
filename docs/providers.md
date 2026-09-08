@@ -46,7 +46,9 @@ All OpenAI settings can be configured in
 api_key = "${OPENAI_API_KEY}"  # API key (required)
 model = "o3"                    # Model to use (default: o3 for general modes)
 timeout = 30.0                  # Request timeout in seconds (default: 30.0)
-temperature = 0.7               # Creativity/randomness, 0.0–2.0 (rejected by o-series and gpt-5 models; omitted for them)
+temperature = 0.7               # Creativity/randomness, 0.0–2.0. Omitted automatically where
+                                # unsupported: o-series models, gpt-5/5.5/5.6-*/gpt-6-astra, and
+                                # any request whose reasoning_effort is above "none".
 max_tokens = 4000               # Maximum response tokens (default: 4000)
 ```
 

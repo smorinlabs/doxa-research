@@ -87,8 +87,8 @@ Immediate modes stream to your terminal. Background Deep Research modes (`all_de
             ┌─────────────┼─────────────┐
             ▼             ▼             ▼
          OpenAI       Perplexity      Gemini
-       (o3-deep-     (sonar-deep-   (deep-research-
-        research)     research)      preview-04-2026)
+       (gpt-5.6-     (sonar-deep-   (deep-research-
+         sol)         research)      preview-04-2026)
 ```
 
 Each enabled provider runs in parallel. Doxa polls each one until completion (or timeout / cancel), then merges the results into a single markdown report with per-provider sections and citation blocks. Long-running background jobs (Deep Research) are checkpointed: you can `Ctrl-C` and resume later, or fire-and-forget with `--async` and pick the result up from a different terminal session via `doxa resume <op-id>`.

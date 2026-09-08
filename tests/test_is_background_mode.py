@@ -103,3 +103,32 @@ def test_supports_temperature_matrix() -> None:
     # discarding a sampling setting the user configured.
     assert supports_temperature("some-future-model") is True
     assert supports_temperature(None) is True
+
+
+def test_requires_background_submission_is_narrower_than_capability() -> None:
+    """Registering Sol as background must not forbid streaming it.
+
+    `is_background_model` answers "default to background research?";
+    `requires_background_submission` answers "cannot run immediately at all".
+    Conflating them removed a capability gpt-5.6-sol actually has.
+    """
+    from doxa_research.config import is_background_model, requires_background_submission
+
+    assert is_background_model("gpt-5.6-sol") is True
+    assert requires_background_submission("gpt-5.6-sol") is False
+    assert requires_background_submission("o3-deep-research") is True
+    assert requires_background_submission("deep-research-preview-04-2026") is True
+
+
+def test_supports_temperature_depends_on_reasoning_effort() -> None:
+    """Verified live 2026-09-08 against gpt-5.2 and gpt-5.4."""
+    from doxa_research.config import supports_temperature
+
+    assert supports_temperature("gpt-5.2", None) is True
+    assert supports_temperature("gpt-5.2", "none") is True
+    assert supports_temperature("gpt-5.2", "low") is False
+    assert supports_temperature("gpt-5.2", "high") is False
+    # Models that reject it outright stay rejected at every effort.
+    assert supports_temperature("gpt-5.6-sol", "none") is False
+    # The alias is capability-consistent with the model it resolves to.
+    assert supports_temperature("gpt-5.6", None) is False

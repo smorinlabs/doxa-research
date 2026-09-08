@@ -72,7 +72,7 @@ BUILTIN_MODES = {
         "model": "gpt-5.6-sol",
         "kind": "background",
         "system_prompt": "Conduct quick, focused research with key findings and essential information. Be concise but thorough.",
-        "description": "Lightweight background research — capped tool calls for faster wall-clock and lower cost than deep_research, still async.",
+        "description": "Concise background research — same model as deep_research with a briefer prompt; set max_tool_calls to bound cost.",
         "auto_input": False,
         # o4-mini-deep-research (retired 2026-07-23) was this mode's cheap
         # tier and has no cheaper replacement: OpenAI names gpt-5.6-sol for
@@ -409,6 +409,7 @@ NO_TEMPERATURE_MODELS: frozenset[str] = frozenset(
         "gpt-5-mini",
         "gpt-5-nano",
         "gpt-5.5",
+        "gpt-5.6",  # alias for -sol; kept consistent with it
         "gpt-5.6-luna",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
@@ -417,23 +418,48 @@ NO_TEMPERATURE_MODELS: frozenset[str] = frozenset(
 )
 
 
-def supports_temperature(model: str | None) -> bool:
-    """Return True if `model` accepts the `temperature` request parameter.
+def requires_background_submission(model: str | None) -> bool:
+    """Return True if `model` *cannot* run on the immediate/streaming path.
 
-    Every o-series reasoning model rejects it, which is a reliable prefix.
-    Beyond those, rejection is irregular and is recorded in
-    `NO_TEMPERATURE_MODELS` from live measurement.
+    Deliberately narrower than `is_background_model()`, which answers "should
+    this default to background research?". The retired o3/o4-mini
+    deep-research models and the Gemini deep-research agents offer no
+    synchronous mode, so `kind = "immediate"` for them is a config error worth
+    refusing before any HTTP call.
 
-    Unknown models default to *sending* temperature. That is deliberate: an
-    unsupported parameter fails loudly with "Unsupported parameter:
-    'temperature' is not supported with this model", which is diagnosable,
-    whereas silently discarding a temperature the user configured changes
-    sampling with no signal. Note the rejection surfaces only on a real call;
-    a validation probe with empty input short-circuits before the
+    gpt-5.6-sol is different: a general-purpose model that OpenAI supports
+    streaming. It belongs in `BACKGROUND_MODELS` so research modes default to
+    background submission with tools, but forbidding immediate use of it would
+    be wrong. Conflating the two meant registering the replacement model
+    silently removed a capability the model has.
+    """
+    return "deep-research" in (model or "")
+
+
+def supports_temperature(model: str | None, reasoning_effort: str | None = None) -> bool:
+    """Return True if this request may carry the `temperature` parameter.
+
+    Support depends on the model *and* the effective reasoning effort, which
+    is why `reasoning_effort` is part of the signature:
+
+    - Every o-series reasoning model rejects temperature outright.
+    - The models in `NO_TEMPERATURE_MODELS` reject it outright.
+    - Models that otherwise accept it reject it once reasoning effort rises
+      above "none". Verified live 2026-09-08: gpt-5.2 and gpt-5.4 accept
+      temperature at effort "none" or unset, and reject it at "low" and "high".
+
+    Unknown models with no raised effort default to *sending* temperature.
+    That is deliberate: an unsupported parameter fails loudly with
+    "Unsupported parameter: 'temperature' is not supported with this model",
+    which is diagnosable, whereas silently discarding a configured temperature
+    changes sampling with no signal. The rejection surfaces only on a real
+    call; a validation probe with empty input short-circuits before the
     compatibility check.
     """
     name = model or ""
-    return not (name.startswith("o") or name in NO_TEMPERATURE_MODELS)
+    if name.startswith("o") or name in NO_TEMPERATURE_MODELS:
+        return False
+    return reasoning_effort in (None, "none")
 
 
 def mode_kind(mode_config: dict[str, Any]) -> str:

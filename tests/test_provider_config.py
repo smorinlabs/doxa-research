@@ -841,12 +841,106 @@ def test_sol_web_search_false_omits_tool_and_choice() -> None:
 
 
 def test_quick_research_has_no_invented_tool_call_cap() -> None:
-    """The cheap tier is gone; an invented default would override user limits."""
+    """The cheap tier is gone; an invented default would override user limits.
+
+    Checks both placements. An earlier version tested only the `openai`
+    namespace, so adding a flat `max_tool_calls` reintroduced the override
+    with the test still green.
+    """
     from doxa_research.config import BUILTIN_MODES
 
-    # The mode carries no openai namespace at all now, which is the invariant:
-    # any default here would win over limits users set on the mode.
-    assert "openai" not in BUILTIN_MODES["quick_research"]
+    mode = BUILTIN_MODES["quick_research"]
+    assert "max_tool_calls" not in mode
+    assert "openai" not in mode
+
+
+def _capture_stream_request(config_extra: dict[str, Any], model: str = "o3") -> dict[str, Any]:
+    """Capture the request kwargs the streaming path builds."""
+    captured: dict[str, Any] = {}
+
+    class _FakeStream:
+        async def __aenter__(self) -> Any:
+            return self
+
+        async def __aexit__(self, *exc: object) -> bool:
+            return False
+
+        def __aiter__(self) -> Any:
+            return self
+
+        async def __anext__(self) -> Any:
+            raise StopAsyncIteration
+
+    def fake_stream(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return _FakeStream()
+
+    provider = OpenAIProvider(api_key="dummy", config={"model": model, "openai": config_extra})
+    provider.client = cast(
+        Any, types.SimpleNamespace(responses=types.SimpleNamespace(stream=fake_stream))
+    )
+
+    async def _drain() -> None:
+        async for _ in provider.stream("test prompt", mode="quick"):
+            pass
+
+    asyncio.run(_drain())
+    return captured
+
+
+def test_stream_preserves_explicit_reasoning_effort_and_tool_choice() -> None:
+    """Explicit settings must survive the immediate path too.
+
+    Defaults may differ between immediate and background, but a value the
+    user configured is dropped by neither.
+    """
+    captured = _capture_stream_request(
+        {"reasoning_effort": "low", "tool_choice": "required", "web_search": True}
+    )
+    assert captured["reasoning"]["effort"] == "low"
+    assert captured["tool_choice"] == "required"
+
+
+def test_stream_omits_temperature_for_models_that_reject_it() -> None:
+    """Guards the stream() path against the prefix rule creeping back.
+
+    Uses gpt-5.5 deliberately. Against an o-series model the old
+    `startswith("o")` rule and the correct one agree, so such a test passes
+    under both implementations and constrains nothing. gpt-5.5 rejects
+    temperature (verified live 2026-09-08) while not starting with "o", which
+    is exactly where the two rules diverge.
+    """
+    captured = _capture_stream_request({"web_search": True}, model="gpt-5.5")
+    assert "temperature" not in captured
+    # And the o-series case still holds.
+    assert "temperature" not in _capture_stream_request({"web_search": True}, model="o3")
+
+
+def test_temperature_dropped_when_reasoning_effort_raised() -> None:
+    """gpt-5.2 accepts temperature at effort "none" and rejects it above.
+
+    Verified live 2026-09-08.
+    """
+    captured: dict[str, Any] = {}
+
+    async def fake_create(*args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return types.SimpleNamespace(id="job-effort")
+
+    provider = OpenAIProvider(
+        api_key="dummy",
+        config={
+            "model": "gpt-5.2",
+            "background": True,
+            "openai": {"reasoning_effort": "high", "temperature": 0.5},
+        },
+    )
+    provider.client = cast(
+        Any, types.SimpleNamespace(responses=types.SimpleNamespace(create=fake_create))
+    )
+    asyncio.run(provider.submit("test prompt", mode="deep_research"))
+    assert captured["reasoning"]["effort"] == "high"
+    assert "temperature" not in captured
 
 
 def test_sol_defaults_to_high_reasoning_effort() -> None:
