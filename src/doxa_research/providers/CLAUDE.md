@@ -81,7 +81,7 @@ try-import + duck-type fallback predicate at module top:
 
 ```python
 try:
-    from google.genai._interactions import GeminiNextGenAPIClientError as _IExc
+    from google.genai._gaos.lib.compat_errors import GeminiNextGenAPIClientError as _IExc
     _HAS_IEXC = True
 except ImportError:
     _HAS_IEXC = False
@@ -175,7 +175,11 @@ non-obvious quirks.
 
 ### Deep Research exception hierarchy (PRIVATE MODULE)
 
-DR exceptions live in **private** module `google.genai._interactions`:
+DR exceptions live in a **private** SDK module whose path moved in
+google-genai 2.0: 1.x used `google.genai._interactions`, 2.x uses
+`google.genai._gaos.lib.compat_errors`. `gemini.py` resolves it newest-first
+and `_is_interactions_error()` keeps a duck-type fallback, so a further move
+degrades classification instead of breaking the import:
 
 ```
 GeminiNextGenAPIClientError  <-  Exception   (NOT inherited from google.genai.errors.APIError)
