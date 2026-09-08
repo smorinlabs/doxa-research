@@ -12,7 +12,7 @@
 #   "python-dateutil>=2.8",
 #   "prompt-toolkit>=3.0",
 #   "tomlkit>=0.13",
-#   "google-genai>=1.74.0"
+#   "google-genai>=2.0.0"
 # ]
 # ///
 """Development entry-point wrapper for doxa-research.
