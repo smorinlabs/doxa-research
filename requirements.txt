@@ -36,7 +36,7 @@ mdurl==0.1.2
     # via markdown-it-py
 openai==2.41.1
 platformdirs==4.9.6
-prompt-toolkit==3.0.52
+prompt-toolkit==3.0.53
 pydantic==2.13.4
     # via openai
 pydantic-core==2.47.0
@@ -63,5 +63,5 @@ typing-extensions==4.15.0
     #   typing-inspection
 typing-inspection==0.4.2
     # via pydantic
-wcwidth==0.8.1
+wcwidth==0.8.3
     # via prompt-toolkit
