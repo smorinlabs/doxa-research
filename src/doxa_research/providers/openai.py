@@ -415,8 +415,18 @@ class OpenAIProvider(ResearchProvider):
         # migration table directs Responses integrations to the non-preview tool,
         # which alone supports `filters`, `external_web_access` and
         # `return_token_budget`. Preview is still accepted but ignores them.
-        # Background for registered/deep-research models, or explicit config.
-        use_background = is_background_model(self.model) or self.config.get("background", False)
+        # Background for registered/deep-research models, or explicit config —
+        # but a mode that declares kind = "immediate" means it, and
+        # `_execute_immediate()` calls submit() then get_result() straight
+        # away. Forcing background there returns a still-queued response and
+        # the run completes with no content. Models that genuinely cannot run
+        # synchronously are refused earlier by `_validate_kind_for_model()`.
+        declared_kind = self.config.get("kind")
+        explicit_background = bool(self.config.get("background", False))
+        if declared_kind == "immediate":
+            use_background = explicit_background
+        else:
+            use_background = is_background_model(self.model) or explicit_background
 
         # Research tools follow *background submission*, not the model name: a
         # custom mode that sets kind="background" and web_search=true on an
@@ -471,7 +481,11 @@ class OpenAIProvider(ResearchProvider):
         explicit_choice = self._resolve_provider_config_value("tool_choice")
         if explicit_choice is not None:
             _ensure_tool_declared(tools, explicit_choice)
-            request_params["tool_choice"] = explicit_choice
+            # A tool choice with no tools to choose from is rejected upstream
+            # and means nothing anyway; a string choice such as "required"
+            # names no tool for `_ensure_tool_declared` to add.
+            if tools:
+                request_params["tool_choice"] = explicit_choice
         elif {t["type"] for t in tools} & {"web_search"} and self.model in BACKGROUND_MODELS:
             request_params["tool_choice"] = {"type": "web_search"}
         request_params["tools"] = tools
@@ -713,7 +727,13 @@ class OpenAIProvider(ResearchProvider):
         if stream_tool_choice is not None:
             stream_tools = request_params.setdefault("tools", [])
             _ensure_tool_declared(stream_tools, stream_tool_choice)
-            request_params["tool_choice"] = stream_tool_choice
+            # Same rule as submit(): "required" names no tool, so with web
+            # search off there is nothing to require and the API would reject
+            # the request.
+            if stream_tools:
+                request_params["tool_choice"] = stream_tool_choice
+            else:
+                request_params.pop("tools", None)
         # Same effort-aware capability test as submit().
         if supports_temperature(self.model, stream_effort):
             request_params["temperature"] = self._resolve_provider_config_value("temperature", 0.7)

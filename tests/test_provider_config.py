@@ -990,8 +990,17 @@ def test_explicit_tool_choice_survives_web_search_disabled() -> None:
 
 
 def test_stream_explicit_tool_choice_survives_without_web_search() -> None:
-    captured = _capture_stream_request({"tool_choice": "required"}, model="gpt-5.4")
-    assert captured["tool_choice"] == "required"
+    """A choice that *names* a tool survives, because the tool gets declared.
+
+    Superseded the earlier version of this test, which asserted that the
+    string "required" survived with no tools. That is the invalid request
+    OpenAI rejects — see `test_string_tool_choice_without_tools_is_not_sent`.
+    """
+    captured = _capture_stream_request(
+        {"tool_choice": {"type": "code_interpreter"}}, model="gpt-5.4"
+    )
+    assert captured["tool_choice"] == {"type": "code_interpreter"}
+    assert "code_interpreter" in {t["type"] for t in captured["tools"]}
 
 
 def test_stream_sends_temperature_when_supported() -> None:
@@ -1149,3 +1158,31 @@ def test_seeded_model_adopts_live_retirement() -> None:
     sol = next(m for m in models if m["id"] == "gpt-5.6-sol")
     assert sol["shutdown_date"] == "2026-07-23"
     assert sol["type"] == "retired"
+
+
+def test_immediate_kind_sol_does_not_force_background() -> None:
+    """A mode declaring kind=immediate means it, even for a registered model.
+
+    `_execute_immediate()` calls submit() then get_result() straight away, so
+    forcing background returns a still-queued response and the run completes
+    with no content.
+    """
+    captured: dict[str, Any] = {}
+
+    async def fake_create(*args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return types.SimpleNamespace(id="job-imm")
+
+    provider = OpenAIProvider(api_key="dummy", config={"model": "gpt-5.6-sol", "kind": "immediate"})
+    provider.client = cast(
+        Any, types.SimpleNamespace(responses=types.SimpleNamespace(create=fake_create))
+    )
+    asyncio.run(provider.submit("p", mode="custom"))
+    assert captured["background"] is False
+
+
+def test_string_tool_choice_without_tools_is_not_sent() -> None:
+    """ "required" names no tool, so with search off there is nothing to require."""
+    captured = _capture_stream_request({"tool_choice": "required"}, model="gpt-5.4")
+    assert "tool_choice" not in captured
+    assert not captured.get("tools")
