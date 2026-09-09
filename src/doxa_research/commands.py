@@ -28,6 +28,7 @@ from doxa_research.hints import print_hint
 from doxa_research.models import ModelCache, OperationStatus
 from doxa_research.paths import user_config_file
 from doxa_research.providers import create_provider, resolve_api_key
+from doxa_research.providers.openai import _is_retired
 from doxa_research.run import run_research
 
 console = Console()
@@ -764,10 +765,27 @@ async def providers_command(
                 table.add_column("Model ID", style="cyan", width=model_id_width)
                 table.add_column("Created", style="green", width=14)
                 table.add_column("Owned By", style="yellow", width=16)
+                table.add_column("Status", style="red", width=22)
 
                 for model in models:
                     created_date = datetime.fromtimestamp(model["created"]).strftime("%Y-%m-%d")
-                    table.add_row(model["id"], created_date, model["owned_by"])
+                    # `/v1/models` keeps listing retired models, so an ID
+                    # appearing here does not mean it is callable. Say so:
+                    # the o3/o4-mini deep-research shutdown was invisible
+                    # precisely because the listing looked normal.
+                    #
+                    # Derived from the date at render time, never from the
+                    # cached `type`: list_models_cached can serve a week-old
+                    # entry, so a model that retired during that week would
+                    # still be labelled active.
+                    shutdown = model.get("shutdown_date")
+                    if shutdown and _is_retired(shutdown):
+                        status = f"retired {shutdown}"
+                    elif shutdown:
+                        status = f"retires {shutdown}"
+                    else:
+                        status = ""
+                    table.add_row(model["id"], created_date, model["owned_by"], status)
             elif provider_name == "perplexity":
                 table = Table(title="Perplexity Models", box=box.ROUNDED)
                 table.add_column("Model ID", style="cyan", width=model_id_width)

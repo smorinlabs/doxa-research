@@ -15,7 +15,7 @@ def test_quick_research_is_a_real_builtin() -> None:
     assert "quick_research" in BUILTIN_MODES
     cfg = BUILTIN_MODES["quick_research"]
     assert "_deprecated_alias_for" not in cfg
-    assert cfg["model"] == "o4-mini-deep-research"
+    assert cfg["model"] == "gpt-5.6-sol"
     assert cfg["kind"] == "background"
 
 

@@ -30,7 +30,11 @@ async def surface_probe(client) -> dict:
     print("=== Surface probe: methods on client.aio.interactions ===")
     methods = [m for m in dir(client.aio.interactions) if not m.startswith("_")]
     print(f"  methods: {methods}")
-    candidates = [m for m in methods if any(s in m.lower() for s in ("continue", "resume", "refetch", "retry"))]
+    candidates = [
+        m
+        for m in methods
+        if any(s in m.lower() for s in ("continue", "resume", "refetch", "retry"))
+    ]
     print(f"  recovery candidates: {candidates or 'NONE'}")
     sigs = {}
     for m in methods:

@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 OP_ID_RE = re.compile(r"Operation ID:\s*(research-\d{8}-\d{6}-[a-f0-9]{16})")
 OPENAI_BACKGROUND_MODE = {
     "provider": "openai",
-    "model": "o4-mini-deep-research",
+    "model": "gpt-5.6-sol",
     "kind": "background",
 }
 
