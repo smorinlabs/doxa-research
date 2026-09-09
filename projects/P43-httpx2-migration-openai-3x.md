@@ -36,10 +36,18 @@ one process plus a concrete type collision.
 **not** adopt the official `perplexityai` SDK (0.43.5) — and move that client to
 httpx2 the way OpenAI did.
 
-**httpx v1 will remain in the lock file, by design.** `google-genai` 2.22.0
-itself declares `httpx>=0.27.0` (`uv.lock`), so httpx cannot leave the
-dependency graph while the Gemini SDK is in use. The goal is that **no
-first-party Doxa module imports `httpx`**, not that the package is absent.
+**httpx v1 stays, in the lock file and in one module, by design.**
+`google-genai` 2.22.0 declares `httpx>=0.27.0` (`uv.lock`), so httpx cannot
+leave the dependency graph while the Gemini SDK is in use. It also cannot leave
+`gemini.py`: that provider translates google-genai's *transport* exceptions,
+catching `httpx.TimeoutException`, `httpx.ConnectError`,
+`httpx.RemoteProtocolError` and `httpx.RequestError` at `gemini.py:312-338`.
+Those objects are raised by the SDK's own httpx client, so the import must
+remain or Gemini error handling silently stops matching.
+
+The goal is therefore narrower than "no httpx imports": **no first-party module
+constructs an httpx client or hands httpx types to the OpenAI SDK.**
+`gemini.py` keeps httpx solely for exception translation.
 
 **Out of Scope**
 - Adopting the `perplexityai` SDK.
@@ -57,15 +65,24 @@ written in the task above it.
 - [ ] [P43-T01] Survey every `httpx` import and type reference across `src/`
       and `tests/`; record the httpx2 equivalent for each.
 - [ ] [P43-T02] Migrate `providers/perplexity.py` to `httpx2`, driven by TS01.
-- [ ] [P43-TS02] Write the equivalence tests for the Gemini helper client and
-      the interactive flow's retry predicates.
+- [ ] [P43-TS02] Write the equivalence tests for the Gemini helper client, the
+      interactive flow's retry predicates, and the timeout object handed to
+      `AsyncOpenAI` — the type swap there is the concrete collision, so it is
+      tested before T04 and T05 rather than alongside them.
 - [ ] [P43-T03] Migrate the `providers/gemini.py` helper client calls.
 - [ ] [P43-T04] Migrate `interactive.py`: the import, the retry predicate, and
       the `httpx.Timeout` passed into `AsyncOpenAI`.
 - [ ] [P43-T05] Replace the `httpx.Timeout` passed into `AsyncOpenAI` at
       `providers/openai.py:244`.
 - [ ] [P43-T06] Bump `openai>=3.9.0` and swap `httpx` for `httpx2` in
-      `pyproject.toml`; re-lock.
+      `pyproject.toml`; re-lock, and regenerate the tracked `requirements.txt`
+      export so it does not keep advertising the old transport.
+- [ ] [P43-T08] Move the Dependabot `openai-stack` group to httpx2
+      (`.github/dependabot.yml:36-41` still patterns on `httpx`), so the group
+      keeps updating the transport in lock-step with the SDK.
+- [ ] [P43-T09] Update the provider transport guidance in
+      `src/doxa_research/providers/CLAUDE.md:150-155`, which documents the
+      current raw-httpx contract for Perplexity.
 - [ ] [P43-T07] Update the `doxa` PEP 723 launcher manifest (lines 4-15), which
       carries its own pins. The v3.2.1 release nearly shipped with a fixed
       package and an unfixed launcher; `doxa_test` executes `./doxa`, so both
@@ -85,21 +102,33 @@ just test-typecheck
 just test-extended      # NOT `pytest tests/extended/`: pyproject.toml sets
                         # addopts = "-m 'not extended and not live_api'", which
                         # deselects every test in that directory and exits 5.
+uv run pytest -m live_api -v   # test-extended runs `-m "extended and not
+                        # extended_slow"` only, so the live_api suite needs its
+                        # own invocation; this migration changes the transport
+                        # every live call rides on.
 ```
 
 No first-party module imports httpx (httpx itself stays in the lock via
 `google-genai`):
 
 ```bash
-if rg -l '^import httpx|^from httpx' src/doxa_research/ | grep -q .; then
-  echo "FAIL: first-party httpx imports remain"; exit 1
+# \b after httpx is required: rg takes a regular expression, so a bare
+# `httpx` also matches every `httpx2` import and the check would fail at
+# exactly the moment the migration succeeds.
+offenders=$(rg -l '^\s*(import|from) httpx\b' src/doxa_research/ \
+             --glob '!providers/gemini.py' || true)
+if [ -n "$offenders" ]; then
+  echo "FAIL: first-party httpx clients remain:"; echo "$offenders"; exit 1
 else
-  echo "OK: no first-party httpx imports"
+  echo "OK: only gemini.py retains httpx, for google-genai exception translation"
 fi
 ```
 
-The explicit if/else matters: `grep -c` exits 1 when it finds nothing, so a
-bare count pipeline would fail the gate at exactly the moment the goal is met.
+Two things this expression gets right that the obvious form does not. The word
+boundary stops `httpx` matching `httpx2`. The `gemini.py` exclusion is
+deliberate, per the scope note above. The explicit if/else matters too, because
+`grep -c` exits nonzero when it finds nothing and would fail the gate exactly
+when the goal is met.
 
 ### Manual Verification
 
