@@ -1186,3 +1186,26 @@ def test_string_tool_choice_without_tools_is_not_sent() -> None:
     captured = _capture_stream_request({"tool_choice": "required"}, model="gpt-5.4")
     assert "tool_choice" not in captured
     assert not captured.get("tools")
+
+
+def test_immediate_sol_gets_no_research_defaults() -> None:
+    """An immediate-kind Sol mode is a short synchronous call.
+
+    Applying the max-effort research default there spends the most expensive
+    reasoning setting on a request that never asked for deep research.
+    """
+    captured: dict[str, Any] = {}
+
+    async def fake_create(*args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return types.SimpleNamespace(id="job-imm2")
+
+    provider = OpenAIProvider(api_key="dummy", config={"model": "gpt-5.6-sol", "kind": "immediate"})
+    provider.client = cast(
+        Any, types.SimpleNamespace(responses=types.SimpleNamespace(create=fake_create))
+    )
+    asyncio.run(provider.submit("p", mode="custom"))
+    assert "effort" not in captured["reasoning"]
+    assert "tool_choice" not in captured
+    # Background Sol still gets them.
+    assert _capture_sol_request()["reasoning"]["effort"] == "max"

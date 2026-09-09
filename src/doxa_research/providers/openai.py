@@ -455,8 +455,14 @@ class OpenAIProvider(ResearchProvider):
         reasoning: dict[str, Any] = {
             "summary": self._resolve_provider_config_value("reasoning_summary", "auto")
         }
+        # Gated on background submission as well as the registry: an
+        # immediate-kind Sol mode is a short synchronous call, and applying the
+        # research default there spends max reasoning on a request that never
+        # asked for deep research. Same conflation as the tools default, one
+        # line further down the same path.
+        research_defaults_apply = use_background and self.model in BACKGROUND_MODELS
         effort = self._resolve_provider_config_value(
-            "reasoning_effort", "max" if self.model in BACKGROUND_MODELS else None
+            "reasoning_effort", "max" if research_defaults_apply else None
         )
         if effort is not None:
             reasoning["effort"] = effort
@@ -486,7 +492,7 @@ class OpenAIProvider(ResearchProvider):
             # names no tool for `_ensure_tool_declared` to add.
             if tools:
                 request_params["tool_choice"] = explicit_choice
-        elif {t["type"] for t in tools} & {"web_search"} and self.model in BACKGROUND_MODELS:
+        elif {t["type"] for t in tools} & {"web_search"} and research_defaults_apply:
             request_params["tool_choice"] = {"type": "web_search"}
         request_params["tools"] = tools
 
