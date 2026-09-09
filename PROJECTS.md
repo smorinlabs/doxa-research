@@ -72,6 +72,7 @@ Older entries may use `**Primary spec**`, `**Plan**`, or
 <!-- Descending P-number order. Scoped / in-progress / done first;
      ideas last. One row per file; one file per row. -->
 
+- [ ] **P43** — [httpx2 Migration (Unblocks the openai 3.x Upgrade)](projects/P43-httpx2-migration-openai-3x.md)
 - [~] **P42** — [Shorten the Doxa Skill Description to Action-Scoped Triggers](projects/P42-doxa-skill-description.md)
 - [ ] **P41** — [`--no-validate` Redesign (Make the Flag Mean What It Says)](projects/P41-no-validate-redesign.md)
 - [x] **P40** — [On-Disk Starter Template (Reverse P33 Generation)](projects/P40-on-disk-starter-template.md)
