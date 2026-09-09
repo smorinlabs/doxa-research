@@ -233,6 +233,44 @@ def _map_openai_error(
     return ProviderError(_PROVIDER_NAME_OPENAI, str(exc), raw_error=raw)
 
 
+def _as_iso_date(value: object) -> str | None:
+    """Normalise a shutdown date to a "YYYY-MM-DD" string, or None.
+
+    `ModelCache.save_cache()` serialises this structure with `json.dump`,
+    which raises TypeError on a `date` or `datetime`. Normalising at the
+    boundary keeps the cached path working for every shape `_is_retired()`
+    accepts.
+    """
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value.strip()[:10] or None
+    return None
+
+
+def _ensure_tool_declared(tools: list[dict[str, Any]], choice: str | dict[str, Any] | None) -> None:
+    """Declare the tool a `tool_choice` names, if it is not already present.
+
+    The Responses API rejects a request that selects a tool it was never
+    given. An explicit `tool_choice = {"type": "code_interpreter"}` on a mode
+    with web search disabled would otherwise be forwarded with an empty
+    `tools` list and fail upstream.
+    """
+    if not isinstance(choice, dict):
+        return  # "auto"/"required"/"none" name no specific tool
+    wanted = choice.get("type")
+    if not wanted or any(t.get("type") == wanted for t in tools):
+        return
+    if wanted == "code_interpreter":
+        tools.append({"type": "code_interpreter", "container": {"type": "auto"}})
+    else:
+        tools.append({"type": wanted})
+
+
 def _is_retired(shutdown_date: object) -> bool:
     """True if `shutdown_date` is today (UTC) or in the past.
 
@@ -377,16 +415,20 @@ class OpenAIProvider(ResearchProvider):
         # migration table directs Responses integrations to the non-preview tool,
         # which alone supports `filters`, `external_web_access` and
         # `return_token_budget`. Preview is still accepted but ignores them.
-        tools: list[dict[str, Any]] = []
-        if is_background_model(self.model):
-            if self._resolve_provider_config_value("web_search", True):
-                tools.append({"type": "web_search"})
-            if self._resolve_provider_config_value("code_interpreter", True):
-                tools.append({"type": "code_interpreter", "container": {"type": "auto"}})
-
-        # Determine if background mode should be used
-        # Background for deep-research models (via is_background_model) or explicit config
+        # Background for registered/deep-research models, or explicit config.
         use_background = is_background_model(self.model) or self.config.get("background", False)
+
+        # Research tools follow *background submission*, not the model name: a
+        # custom mode that sets kind="background" and web_search=true on an
+        # ordinary model asked for grounding and must get it. Tool defaults
+        # (both on) still only apply to models we recognise as research models.
+        research_defaults = is_background_model(self.model)
+        tools: list[dict[str, Any]] = []
+        if use_background:
+            if self._resolve_provider_config_value("web_search", research_defaults):
+                tools.append({"type": "web_search"})
+            if self._resolve_provider_config_value("code_interpreter", research_defaults):
+                tools.append({"type": "code_interpreter", "container": {"type": "auto"}})
 
         # Get configuration parameters
         temperature = self._resolve_provider_config_value("temperature", 0.7)
@@ -400,7 +442,9 @@ class OpenAIProvider(ResearchProvider):
         # scale, for background research. Verified accepted by gpt-5.6-sol the
         # same day. This is the most expensive setting and no medium-vs-max
         # quality comparison has been run; override per mode to lower it.
-        reasoning: dict[str, Any] = {"summary": "auto"}
+        reasoning: dict[str, Any] = {
+            "summary": self._resolve_provider_config_value("reasoning_summary", "auto")
+        }
         effort = self._resolve_provider_config_value(
             "reasoning_effort", "max" if self.model in BACKGROUND_MODELS else None
         )
@@ -424,12 +468,13 @@ class OpenAIProvider(ResearchProvider):
         # Interpreter also enabled by default, plain "required" is satisfied
         # by any tool, so a calculation alone would meet it and the answer
         # could still be ungrounded.
-        tool_types = {t["type"] for t in tools}
         explicit_choice = self._resolve_provider_config_value("tool_choice")
         if explicit_choice is not None:
+            _ensure_tool_declared(tools, explicit_choice)
             request_params["tool_choice"] = explicit_choice
-        elif "web_search" in tool_types and self.model in BACKGROUND_MODELS:
+        elif {t["type"] for t in tools} & {"web_search"} and self.model in BACKGROUND_MODELS:
             request_params["tool_choice"] = {"type": "web_search"}
+        request_params["tools"] = tools
 
         # Only add temperature for models that support it. Reasoning models
         # (o-series) and the gpt-5 family both reject it: gpt-5.6-sol returns
@@ -666,6 +711,8 @@ class OpenAIProvider(ResearchProvider):
             request_params["tools"] = [{"type": "web_search"}]
         stream_tool_choice = self._resolve_provider_config_value("tool_choice")
         if stream_tool_choice is not None:
+            stream_tools = request_params.setdefault("tools", [])
+            _ensure_tool_declared(stream_tools, stream_tool_choice)
             request_params["tool_choice"] = stream_tool_choice
         # Same effort-aware capability test as submit().
         if supports_temperature(self.model, stream_effort):
@@ -862,15 +909,26 @@ class OpenAIProvider(ResearchProvider):
         try:
             response = await self.client.models.list()
             api_models = []
+            seeded = {m["id"]: m for m in response_models}
             for model in response.data:
-                # Include all models without filtering
-                # Don't duplicate the response models we already added
-                if model.id not in ["o3", "gpt-5.6-sol", "gpt-5.6"]:
+                shutdown_raw = getattr(model, "shutdown_date", None)
+                shutdown = _as_iso_date(shutdown_raw)
+                # A seeded row is hardcoded with shutdown_date None. If the API
+                # reports a retirement for that same ID, the live record wins —
+                # otherwise the Status column would keep calling a dead model
+                # active, which is the failure this whole change exists to stop.
+                if model.id in seeded:
+                    if shutdown:
+                        seeded[model.id]["shutdown_date"] = shutdown
+                        seeded[model.id]["type"] = (
+                            "retired" if _is_retired(shutdown) else seeded[model.id]["type"]
+                        )
+                    continue
+                if True:
                     # `/v1/models` lists retired models too, carrying a past
                     # `shutdown_date`. Discarding that field is what let the
                     # o3/o4-mini shutdown stay invisible: the IDs still appear,
                     # but every call returns `model_not_found`. Surface it.
-                    shutdown = getattr(model, "shutdown_date", None)
                     api_models.append(
                         {
                             "id": model.id,

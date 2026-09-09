@@ -28,6 +28,7 @@ from doxa_research.hints import print_hint
 from doxa_research.models import ModelCache, OperationStatus
 from doxa_research.paths import user_config_file
 from doxa_research.providers import create_provider, resolve_api_key
+from doxa_research.providers.openai import _is_retired
 from doxa_research.run import run_research
 
 console = Console()
@@ -772,8 +773,13 @@ async def providers_command(
                     # appearing here does not mean it is callable. Say so:
                     # the o3/o4-mini deep-research shutdown was invisible
                     # precisely because the listing looked normal.
+                    #
+                    # Derived from the date at render time, never from the
+                    # cached `type`: list_models_cached can serve a week-old
+                    # entry, so a model that retired during that week would
+                    # still be labelled active.
                     shutdown = model.get("shutdown_date")
-                    if model.get("type") == "retired":
+                    if shutdown and _is_retired(shutdown):
                         status = f"retired {shutdown}"
                     elif shutdown:
                         status = f"retires {shutdown}"

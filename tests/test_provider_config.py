@@ -1063,3 +1063,89 @@ def test_provider_scope_accepts_structured_tool_choice_and_summary() -> None:
     cfg = OpenAIConfig(api_key="k", tool_choice={"type": "web_search"}, reasoning_summary="auto")
     assert cfg.tool_choice == {"type": "web_search"}
     assert cfg.reasoning_summary == "auto"
+
+
+# --- PR #147 bot-review findings ---------------------------------------------
+
+
+def test_explicit_tool_choice_declares_the_tool_it_names() -> None:
+    """A tool_choice naming an undeclared tool is an invalid request.
+
+    Greptile P1: the previous fix forwarded the choice with `tools` empty,
+    so OpenAI rejected the call.
+    """
+    captured = _capture_stream_request(
+        {"tool_choice": {"type": "code_interpreter"}}, model="gpt-5.4"
+    )
+    assert {t["type"] for t in captured["tools"]} >= {"code_interpreter"}
+    assert captured["tool_choice"] == {"type": "code_interpreter"}
+
+
+def test_submit_honours_configured_reasoning_summary() -> None:
+    """submit() hardcoded "auto" while stream() honoured the setting."""
+    assert _capture_sol_request({"reasoning_summary": "detailed"})["reasoning"]["summary"] == (
+        "detailed"
+    )
+    assert _capture_sol_request()["reasoning"]["summary"] == "auto"
+
+
+def test_explicitly_backgrounded_ordinary_model_keeps_web_search() -> None:
+    """kind=background + web_search=true on a plain model must send the tool."""
+    captured: dict[str, Any] = {}
+
+    async def fake_create(*args: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        return types.SimpleNamespace(id="job-bg")
+
+    provider = OpenAIProvider(
+        api_key="dummy",
+        config={"model": "gpt-5.4", "background": True, "openai": {"web_search": True}},
+    )
+    provider.client = cast(
+        Any, types.SimpleNamespace(responses=types.SimpleNamespace(create=fake_create))
+    )
+    asyncio.run(provider.submit("p", mode="custom"))
+    assert "web_search" in {t["type"] for t in captured["tools"]}
+
+
+def test_list_models_normalises_typed_shutdown_dates() -> None:
+    """A date/datetime would break ModelCache's json.dump."""
+    import json
+    from datetime import date as _date
+
+    async def fake_list() -> object:
+        return types.SimpleNamespace(
+            data=[
+                types.SimpleNamespace(
+                    id="old-model", created=1, owned_by="system", shutdown_date=_date(2026, 7, 23)
+                )
+            ]
+        )
+
+    provider = OpenAIProvider(api_key="dummy", config={"model": "gpt-5.6-sol"})
+    provider.client = cast(Any, types.SimpleNamespace(models=types.SimpleNamespace(list=fake_list)))
+    models = asyncio.run(provider.list_models())
+    entry = next(m for m in models if m["id"] == "old-model")
+    assert entry["shutdown_date"] == "2026-07-23"
+    assert entry["type"] == "retired"
+    json.dumps(models)  # must not raise
+
+
+def test_seeded_model_adopts_live_retirement() -> None:
+    """A seeded row must not keep claiming a retired model is active."""
+
+    async def fake_list() -> object:
+        return types.SimpleNamespace(
+            data=[
+                types.SimpleNamespace(
+                    id="gpt-5.6-sol", created=1, owned_by="system", shutdown_date="2026-07-23"
+                )
+            ]
+        )
+
+    provider = OpenAIProvider(api_key="dummy", config={"model": "gpt-5.6-sol"})
+    provider.client = cast(Any, types.SimpleNamespace(models=types.SimpleNamespace(list=fake_list)))
+    models = asyncio.run(provider.list_models())
+    sol = next(m for m in models if m["id"] == "gpt-5.6-sol")
+    assert sol["shutdown_date"] == "2026-07-23"
+    assert sol["type"] == "retired"
