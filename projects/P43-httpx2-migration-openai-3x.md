@@ -54,16 +54,27 @@ constructs an httpx client or hands httpx types to the OpenAI SDK.**
 - Replacing or forking `google-genai` to drop its transitive `httpx`.
 - `google-genai` version work: already current at 2.22.0 as of 2026-09-08.
 
-### Tests & Tasks
+## Tests & Tasks
 
 Test design comes first: each migration task is driven by the regression tests
 written in the task above it.
 
+- [ ] [P43-T00] Add `httpx2` to `pyproject.toml` and sync, **before** any
+      consumer is migrated. T02 onwards import httpx2, so declaring it only at
+      the dependency-swap step would leave every intermediate commit unable to
+      run. Removing `httpx` and bumping `openai` stays in T06, once nothing
+      first-party imports the old transport.
+- [ ] [P43-TS00] Write the characterisation test for Gemini's retained httpx
+      exception boundary (`gemini.py:312-338`) before anything moves, so the
+      one module that must keep catching google-genai's transport errors has a
+      regression test proving it still does.
 - [ ] [P43-TS01] Write the httpx2 equivalence tests for the Perplexity client:
       status mapping, timeout behaviour, and each exception type currently
       caught (`HTTPStatusError`, `TimeoutException`, `ConnectError`).
 - [ ] [P43-T01] Survey every `httpx` import and type reference across `src/`
-      and `tests/`; record the httpx2 equivalent for each.
+      and `tests/`; record the httpx2 equivalent for each. Includes the
+      existing Perplexity suite, which asserts on httpx types directly
+      (`tests/test_provider_perplexity_async.py:407-419`).
 - [ ] [P43-T02] Migrate `providers/perplexity.py` to `httpx2`, driven by TS01.
 - [ ] [P43-TS02] Write the equivalence tests for the Gemini helper client, the
       interactive flow's retry predicates, and the timeout object handed to
@@ -92,7 +103,7 @@ written in the task above it.
 - [ ] [P43-TS04] Live smoke test per provider: one background OpenAI call, one
       Perplexity async call, one Gemini Deep Research call.
 
-### Automated Verification
+## Automated Verification
 
 ```bash
 make env-check          # dependency preflight
@@ -102,6 +113,11 @@ just test-typecheck
 just test-extended      # NOT `pytest tests/extended/`: pyproject.toml sets
                         # addopts = "-m 'not extended and not live_api'", which
                         # deselects every test in that directory and exits 5.
+# The live suite needs real credentials. Without them it deselects or skips
+# and passes vacuously, which is not verification — so assert they exist first.
+for k in OPENAI_API_KEY PERPLEXITY_API_KEY GEMINI_API_KEY; do
+  [ -n "${!k:-}" ] || { echo "FAIL: $k unset; live verification cannot run"; exit 1; }
+done
 uv run pytest -m live_api -v   # test-extended runs `-m "extended and not
                         # extended_slow"` only, so the live_api suite needs its
                         # own invocation; this migration changes the transport
@@ -116,7 +132,7 @@ No first-party module imports httpx (httpx itself stays in the lock via
 # `httpx` also matches every `httpx2` import and the check would fail at
 # exactly the moment the migration succeeds.
 offenders=$(rg -l '^\s*(import|from) httpx\b' src/doxa_research/ \
-             --glob '!providers/gemini.py' || true)
+             --glob '!**/providers/gemini.py' || true)
 if [ -n "$offenders" ]; then
   echo "FAIL: first-party httpx clients remain:"; echo "$offenders"; exit 1
 else
@@ -124,13 +140,15 @@ else
 fi
 ```
 
-Two things this expression gets right that the obvious form does not. The word
-boundary stops `httpx` matching `httpx2`. The `gemini.py` exclusion is
+Three things this expression gets right that the obvious form does not. The
+word boundary stops `httpx` matching `httpx2`. The exclusion glob needs the
+`**/` prefix: `!providers/gemini.py` does not match when the search path is
+`src/doxa_research/`, verified by running both forms. The exclusion itself is
 deliberate, per the scope note above. The explicit if/else matters too, because
 `grep -c` exits nonzero when it finds nothing and would fail the gate exactly
 when the goal is met.
 
-### Manual Verification
+## Manual Verification
 
 ```bash
 ./doxa ask -m all_deep_research -q "What changed in HTTP client libraries in 2026?"
