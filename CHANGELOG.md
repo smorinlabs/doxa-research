@@ -2,6 +2,33 @@
 
 All notable changes to Doxa Research are documented here.
 
+## [3.3.0](https://github.com/smorinlabs/doxa-research/compare/v3.2.1...v3.3.0) (2026-09-09)
+
+
+### Features
+
+* **openai:** default background research to reasoning_effort "max" ([0999893](https://github.com/smorinlabs/doxa-research/commit/09998933c38ccb47d3698a6556c956c8fa357dba))
+* **openai:** migrate to gpt-5.6-sol after the deep-research shutdown ([062a94f](https://github.com/smorinlabs/doxa-research/commit/062a94f7c06e95116fa3333ef428837547338a60))
+* **openai:** migrate to gpt-5.6-sol after the deep-research shutdown ([e2513e8](https://github.com/smorinlabs/doxa-research/commit/e2513e833cd4a2e4a1f2f757f0f542a65412086a))
+
+
+### Bug Fixes
+
+* **openai:** address second-round review findings on the sol migration ([5335f96](https://github.com/smorinlabs/doxa-research/commit/5335f9664e684f9b1ae41caad07be9f79edd6475))
+* **openai:** address the Muse review of the sol migration ([de9bbd1](https://github.com/smorinlabs/doxa-research/commit/de9bbd1ce850c36ba47d0b4f3d7c8a24fc13b7cf))
+* **openai:** gate the research defaults on background submission ([5ee8794](https://github.com/smorinlabs/doxa-research/commit/5ee8794b9848c0a99bf502a16b39a8ca60bcddde))
+* **openai:** honour declared immediate kind and empty tool sets ([786b596](https://github.com/smorinlabs/doxa-research/commit/786b5962316e34671ab805e24f6cb05ecb121550))
+* **openai:** resolve the automated review findings on PR 147 ([7db526d](https://github.com/smorinlabs/doxa-research/commit/7db526d1112b08fc333baf0143c045c688a40130))
+
+
+### Documentation
+
+* **projects:** fix the P43 task ordering and verification gates ([99b2bda](https://github.com/smorinlabs/doxa-research/commit/99b2bda19dd455f0d48b6d360cc7f32fdd6cbca5))
+* **projects:** resolve the automated review findings on P43 ([b93634e](https://github.com/smorinlabs/doxa-research/commit/b93634e125a94181d2573173049564a1086a44f9))
+* **projects:** schedule P43, the httpx2 migration and openai 3.x upgrade ([d1fcf38](https://github.com/smorinlabs/doxa-research/commit/d1fcf38835e9e5a811c2d1208577381b7770e995))
+* **projects:** schedule P43, the httpx2 migration and openai 3.x upgrade ([396c70c](https://github.com/smorinlabs/doxa-research/commit/396c70cefe89b5b9e81ca548f8e0bd06c100fe3a))
+* **projects:** scope the httpx goal and fix the P43 verification gates ([8d10259](https://github.com/smorinlabs/doxa-research/commit/8d10259890f68f64f1051af6e2ae079c26c0f163))
+
 ## [3.2.1](https://github.com/smorinlabs/doxa-research/compare/v3.2.0...v3.2.1) (2026-09-08)
 
 
