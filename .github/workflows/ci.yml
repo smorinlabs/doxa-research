@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
-      - uses: reviewdog/action-actionlint@v1.72.0
+      - uses: reviewdog/action-actionlint@v1.73.4
         with:
           reporter: github-check
           fail_level: error
@@ -95,7 +95,7 @@ jobs:
         with:
           fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 0 }}
       - name: Scan for verified secrets
-        uses: trufflesecurity/trufflehog@v3.95.5
+        uses: trufflesecurity/trufflehog@v3.97.4
         with:
           base: ${{ github.event.pull_request.base.sha || '' }}
           head: ${{ github.event.pull_request.head.sha || github.sha }}
