@@ -2820,7 +2820,10 @@ all_tests = [
         description="OpenAI provider with real API key",
         command=[DOXA_EXECUTABLE, "test openai", "--provider", "openai"],
         expected_stdout_patterns=[r".+"],
-        not_expected_files=["*_openai_*.md"],
+        # Since cd58d01 (2026-05-19) --output-dir applies to immediate modes too,
+        # and the runner injects it for tmpdir isolation, so the auto-named file
+        # IS written. Resolved against the injected output_base.
+        expected_files=["*_openai_*.md"],
         expected_exit_code=0,
         provider="openai",
         api_key_method="env",
@@ -2849,7 +2852,8 @@ all_tests = [
             "gemini-2.5-flash-lite",
         ],
         expected_stdout_patterns=[r".+"],
-        not_expected_files=["*_gemini_*.md"],
+        # See REAL-01: the injected --output-dir writes an auto-named file.
+        expected_files=["*_gemini_*.md"],
         expected_exit_code=0,
         provider="gemini",
         api_key_method="env",
@@ -3520,7 +3524,11 @@ all_tests = [
             "--out",
             "{tmpdir}/openai-output.md",
         ],
-        not_expected_stdout_patterns=[r".+"],
+        # The streamed answer goes to --out, not stdout; stdout carries only the
+        # save confirmation from the runner-injected --output-dir. Asserting an
+        # entirely empty stdout tested pre-cd58d01 behaviour, not this test's
+        # subject, which the file assertions below verify.
+        expected_stdout_patterns=[r"Saved to"],
         expected_files=["openai-output.md"],
         expected_file_content_patterns={"openai-output.md": [r".+"]},
         expected_exit_code=0,
@@ -3560,7 +3568,8 @@ all_tests = [
             "./test_config.toml",
         ],
         expected_stdout_patterns=[r".+"],
-        not_expected_files=["*_openai_*.md"],
+        # See REAL-01: the injected --output-dir writes an auto-named file.
+        expected_files=["*_openai_*.md"],
         cleanup_files=["test_config.toml"],
         expected_exit_code=0,
         provider="openai",
