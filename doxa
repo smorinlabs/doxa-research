@@ -1,32 +1,16 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = [
-#   "click>=8.0",
-#   "openai>=1.14.0",
-#   "httpx>=0.27.0",
-#   "rich>=13.7",
-#   "platformdirs>=3.0",
-#   "aiofiles>=23.0",
-#   "tenacity>=8.0",
-#   "python-dateutil>=2.8",
-#   "prompt-toolkit>=3.0",
-#   "tomlkit>=0.13",
-#   "google-genai>=2.0.0"
-# ]
-# ///
-"""Development entry-point wrapper for doxa-research.
-
-This script is used for local development and backward compatibility.
-When installed via PyPI, the `doxa-research` command is provided by the package
-entry point defined in pyproject.toml.
-"""
-import sys
-from pathlib import Path
-
-# Add src/ to sys.path so the local package is importable without installation
-sys.path.insert(0, str(Path(__file__).parent / "src"))
-
-from doxa_research.__main__ import main  # noqa: E402
-
-main()
+#!/usr/bin/env bash
+# Development entry-point wrapper for doxa-research.
+#
+# Thin shim over the package's own console script. It exists only so the
+# repo-relative path `./doxa` keeps working for `doxa_test`, the justfile smoke
+# targets, and CONTRIBUTING; it adds no behaviour of its own.
+#
+# Deliberately NOT a PEP 723 script. That form carried a second, hand-maintained
+# dependency manifest with no lockfile, which drifted from pyproject.toml and
+# silently resolved a different major version of the OpenAI SDK than the package
+# — while CI validated the integration suite through exactly that drifted
+# environment. Resolving through uv.lock instead means one dependency set.
+#
+# When installed from PyPI, `doxa` and `doxa-research` are provided directly by
+# the [project.scripts] entry points and this file is not involved.
+exec uv run --frozen --quiet doxa "$@"
