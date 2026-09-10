@@ -460,7 +460,7 @@ def _ensure_test_config_home() -> Path:
     global _TEST_CONFIG_HOME
     with _TEST_CONFIG_HOME_LOCK:
         if _TEST_CONFIG_HOME is None:
-            _TEST_CONFIG_HOME = Path(tempfile.mkdtemp(prefix=f"doxa-test-"))
+            _TEST_CONFIG_HOME = Path(tempfile.mkdtemp(prefix="doxa-test-"))
             os.environ["XDG_CONFIG_HOME"] = str(_TEST_CONFIG_HOME)
             os.environ["XDG_STATE_HOME"] = str(_TEST_CONFIG_HOME)
             os.environ["XDG_CACHE_HOME"] = str(_TEST_CONFIG_HOME)
@@ -895,7 +895,10 @@ class InteractiveTestRunner:
                 env=test_env,
                 encoding="utf-8",
                 timeout=test_case.timeout,
-                dimensions=(100, 200),  # Large enough for full modes-list output without scrollback issues
+                dimensions=(
+                    100,
+                    200,
+                ),  # Large enough for full modes-list output without scrollback issues
                 maxread=65536,  # default 2000 truncated multi-screen output (e.g. the /mode listing)
             )
 
