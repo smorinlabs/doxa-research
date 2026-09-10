@@ -13,4 +13,4 @@
 #
 # When installed from PyPI, `doxa` and `doxa-research` are provided directly by
 # the [project.scripts] entry points and this file is not involved.
-exec uv run --frozen --no-sync --quiet doxa "$@"
+exec uv run --frozen --quiet doxa "$@"
