@@ -15,11 +15,17 @@ install-dev: install
     bun install
     just install-lefthook
 
-# Install doxa to /usr/local/bin
+# Install the `doxa` command onto PATH, isolated from this checkout.
+#
+# Deliberately NOT `cp doxa /usr/local/bin/`. Since ./doxa became a shim over
+# `uv run doxa`, copying it outside the checkout produces a command that
+# re-executes itself: uv resolves `doxa` from PATH, finds the copy, and runs it
+# again. `uv tool install` installs the package's own console script into its
+# own environment, so the installed command has no dependency on this directory.
 [group: 'setup']
 install-bin:
-    cp doxa /usr/local/bin/
-    chmod +x /usr/local/bin/doxa
+    uv tool install --force .
+    @echo "Installed. Ensure uv's tool bin directory is on PATH: uv tool update-shell"
 
 # Check environment dependencies
 [group: 'setup']
