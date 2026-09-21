@@ -38,7 +38,7 @@ jobs:
     # provider quota.
     if: github.repository == 'smorinlabs/doxa-research'
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: "3.11"
