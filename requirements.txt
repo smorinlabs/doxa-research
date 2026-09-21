@@ -3,15 +3,15 @@
 aiofiles==25.1.0
 annotated-types==0.7.0
     # via pydantic
-anyio==4.13.0
+anyio==4.15.1
     # via
     #   httpx
     #   openai
-certifi==2026.5.20
+certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
-click==8.4.1
+click==8.5.0
 colorama==0.4.6 ; sys_platform == 'win32'
     # via
     #   click
@@ -24,24 +24,24 @@ httpcore==1.0.9
     # via httpx
 httpx==0.28.1
     # via openai
-idna==3.16
+idna==3.19
     # via
     #   anyio
     #   httpx
-jiter==0.15.0
+jiter==0.16.0
     # via openai
 markdown-it-py==4.2.0
     # via rich
 mdurl==0.1.2
     # via markdown-it-py
 openai==2.41.1
-platformdirs==4.9.6
-prompt-toolkit==3.0.53
-pydantic==2.13.4
+platformdirs==4.11.7
+prompt-toolkit==3.0.52
+pydantic==2.13.5
     # via openai
-pydantic-core==2.47.0
+pydantic-core==2.49.0
     # via pydantic
-pygments==2.20.0
+pygments==2.21.0
     # via rich
 python-dateutil==2.9.0.post0
 rich==15.0.0
@@ -52,16 +52,16 @@ sniffio==1.3.1
     #   anyio
     #   openai
 tenacity==9.1.4
-tqdm==4.67.3
+tqdm==4.70.0
     # via openai
-typing-extensions==4.15.0
+typing-extensions==4.16.0
     # via
     #   anyio
     #   openai
     #   pydantic
     #   pydantic-core
     #   typing-inspection
-typing-inspection==0.4.2
+typing-inspection==0.4.4
     # via pydantic
-wcwidth==0.8.3
+wcwidth==0.8.1
     # via prompt-toolkit

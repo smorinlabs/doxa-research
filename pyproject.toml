@@ -29,7 +29,10 @@ classifiers = [
 ]
 dependencies = [
     "click>=8.3.3",
-    "openai>=2.36.0",
+    # <3 until the httpx2 migration (P43): openai 3.x makes httpx2 the default
+    # transport and drops httpx, while providers/ still construct httpx clients
+    # and hand httpx.Timeout to AsyncOpenAI.
+    "openai>=2.36.0,<3",
     "httpx>=0.27.0",
     "rich>=13.7",
     "aiofiles>=25.1.0",
