@@ -1,150 +1,43 @@
+# One weekly routine-update PR across Python and GitHub Actions.
+# Wildcards include all dependency types and major, minor, and patch updates.
 version: 2
-updates:
-  # ─── Python (pip) ──────────────────────────────────────────────────
-  - package-ecosystem: "pip"
-    directory: "/"
+
+multi-ecosystem-groups:
+  all-dependencies:
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
-    labels:
-      - "dependencies"
-
-    # Route dependency bumps to the `Dependencies` CHANGELOG section by
-    # using the `deps` type prefix. Without this, dependabot defaults to
-    # `chore(deps): ...`, which release-please buckets under hidden
-    # `chore` — every dependency bump silently disappears from CHANGELOG.
-    # See release-please-config.json `changelog-sections` for the routing.
-    #
-    # `include: scope` is intentionally omitted — dependabot's default
-    # scope is `deps`, which produced redundant `deps(deps): bump …`
-    # subjects. Without it, commits read `deps: bump click from 8.4.0…`,
-    # carrying the same routing info without the duplicate token.
+    # Keep dependency bumps in the Dependencies CHANGELOG section.
+    # Omit include: scope to avoid the redundant deps(deps) prefix.
     commit-message:
       prefix: "deps"
 
-    # Wait 3 days after a release before opening a PR. Buffer against
-    # the "bad release retracted within hours" pattern that hits major
-    # libraries like openai or pydantic.
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    # Retain the existing buffer against newly released broken versions.
     cooldown:
       default-days: 3
-
     groups:
-      # The OpenAI SDK and its HTTP/JSON transport stack are tightly
-      # coupled at runtime — incompatible versions surface as cryptic
-      # serialization errors. Batch minor/patch updates together so the
-      # versions move in lock-step.
-      openai-stack:
-        applies-to: version-updates
-        patterns:
-          - "openai"
-          - "httpx"
-          - "jiter"
-        update-types:
-          - "minor"
-          - "patch"
+      security-updates:
+        applies-to: "security-updates"
+        patterns: ["*"]
 
-      # Terminal-UI / Rich rendering stack. All used by the interactive
-      # CLI surface; their version compatibility matters together.
-      terminal-ui:
-        applies-to: version-updates
-        patterns:
-          - "rich"
-          - "prompt-toolkit"
-          - "wcwidth"
-          - "markdown-it-py"
-        update-types:
-          - "minor"
-          - "patch"
-
-      # Pydantic + typing helpers. pydantic-core ships with pydantic;
-      # typing-extensions and typing-inspection are transitive but
-      # released frequently.
-      pydantic-stack:
-        applies-to: version-updates
-        patterns:
-          - "pydantic"
-          - "pydantic-*"
-          - "typing-extensions"
-          - "typing-inspection"
-        update-types:
-          - "minor"
-          - "patch"
-
-      # Test framework stack (dev only).
-      test-stack:
-        applies-to: version-updates
-        dependency-type: "development"
-        patterns:
-          - "pytest"
-          - "pytest-*"
-          - "vcrpy"
-          - "pexpect"
-        update-types:
-          - "minor"
-          - "patch"
-
-      # Code-quality dev tools. `ty` is pre-1.0 so its 0.0.x bumps count
-      # as "patch" under SemVer-loose semantics; let the group handle them.
-      dev-tools:
-        applies-to: version-updates
-        dependency-type: "development"
-        patterns:
-          - "ruff"
-          - "ty"
-        update-types:
-          - "minor"
-          - "patch"
-
-      # Catch-all for any remaining patch-only bumps not covered by a
-      # named group above. Keeps PR count bounded even when patches
-      # land on small/utility deps (aiofiles, tenacity, click, etc.).
-      # Note: minor/major bumps for un-grouped deps still get individual
-      # PRs (since this group only catches `patch`).
-      patch-misc:
-        applies-to: version-updates
-        patterns:
-          - "*"
-        update-types:
-          - "patch"
-
-  # ─── GitHub Actions ────────────────────────────────────────────────
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule:
-      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "github-actions"
-
-    # See pip ecosystem above for rationale (prefix + omitted scope).
-    commit-message:
-      prefix: "deps"
-
     cooldown:
       default-days: 3
-
     groups:
-      # GitHub-published actions/* repos plus github/codeql-action/*.
-      # GitHub co-versions these; safe to batch.
-      actions-core:
-        applies-to: version-updates
-        patterns:
-          - "actions/*"
-          - "github/codeql-action/*"
-        update-types:
-          - "minor"
-          - "patch"
-
-      # Vendor-published actions we use across workflows.
-      vendor-actions:
-        applies-to: version-updates
-        patterns:
-          - "astral-sh/*"
-          - "googleapis/*"
-          - "wagoid/*"
-          - "reviewdog/*"
-          - "trufflesecurity/*"
-        update-types:
-          - "minor"
-          - "patch"
+      security-updates:
+        applies-to: "security-updates"
+        patterns: ["*"]
