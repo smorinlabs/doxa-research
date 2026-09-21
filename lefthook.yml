@@ -12,7 +12,7 @@ pre-commit:
   parallel: true
   commands:
     editorconfig:
-      run: uvx --from editorconfig-checker ec {staged_files}
+      run: uvx --from 'editorconfig-checker==3.6.1' ec {staged_files}
 
     # Glob excludes md/txt: prose authors shouldn't have trailing
     # whitespace silently rewritten under them. Source files (yml, sh,
@@ -121,4 +121,4 @@ pre-push:
     # cascade into every subsequent CI run. This mirrors ci.yml's Hygiene
     # job. Markdown is excluded via .editorconfig-checker.json (Exclude list).
     editorconfig-full:
-      run: uvx --from editorconfig-checker ec
+      run: uvx --from 'editorconfig-checker==3.6.1' ec

@@ -136,7 +136,7 @@ Releases publish to PyPI via `publish.yml` when a `vX.Y.Z` tag is pushed. Chain:
 2. Review the PR's CHANGELOG diff for honesty (release-please can propose stale content if the manifest drifted; see CHANGELOG entry for v3.0.6 for a recovery example).
 3. Merge the Release PR → release-please tags `vX.Y.Z` via the GitHub App token.
 4. `publish.yml` runs: build → TestPyPI (auto OIDC) → PyPI (required-reviewer gate; maintainer approves in Actions UI).
-5. `git pull --rebase origin main` locally to absorb the release commit; `uv sync` should be a no-op (CI's `sync-uv-lock` job already committed the lock update).
+5. On a clean local `main`: `git pull --ff-only origin main` to absorb the release commit; `uv sync` should be a no-op (CI's `sync-uv-lock` job already committed the lock update).
 
 Why the App token vs `GITHUB_TOKEN`: only the App token can retrigger downstream workflows after the tag push. See `RELEASE-PLEASE-APP.md`.
 
@@ -194,14 +194,15 @@ git fetch origin
 git status -sb     # check [ahead N, behind M]
 ```
 
-If `[behind M]` with `M > 0`, STOP and `git pull --rebase origin main` before committing or pushing. Pushing a stale branch fails with "fetch first" — and any local commits may need re-doing if release-please bumped versions in the meantime.
+If `[behind M]` with `M > 0`, STOP and `git pull --ff-only origin main` before committing or pushing. If `--ff-only` refuses, you have local commits and origin has moved — that refusal is the signal to use `git pull --rebase origin main` instead. Pushing a stale branch fails with "fetch first" — and any local commits may need re-doing if release-please bumped versions in the meantime.
 
 ### After every release-please tag, `uv sync` locally
 
 release-please bumps `pyproject.toml` + `__init__.py` + manifest when it tags. The CI `sync-uv-lock` job in `release-please.yml` auto-commits the new `uv.lock` on the CI side; your local won't have it until pull.
 
 ```bash
-git pull --rebase origin main      # pulls release bump + CI's lock-sync
+git switch main
+git pull --ff-only origin main     # pulls release bump + CI's lock-sync
 uv sync                            # idempotent if CI already synced
 ```
 
@@ -226,7 +227,9 @@ Why `--theirs`: origin's `uv.lock` incorporates merged dependabot/release-please
 
 ### "Fetch first" push rejection
 
-Origin moved while you were working. Don't force-push.
+Origin moved while you were working and you have local commits, so
+`--ff-only` cannot apply — this is the documented fallback case for
+`--rebase`. Don't force-push.
 ```bash
 git fetch origin
 git pull --rebase origin main

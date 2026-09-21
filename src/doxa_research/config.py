@@ -15,6 +15,7 @@ Precedence (lowest → highest): defaults → user TOML → project TOML → env
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -69,11 +70,17 @@ BUILTIN_MODES = {
     },
     "quick_research": {
         "provider": "openai",
-        "model": "o4-mini-deep-research",
+        "model": "gpt-5.6-sol",
         "kind": "background",
         "system_prompt": "Conduct quick, focused research with key findings and essential information. Be concise but thorough.",
-        "description": "Lightweight background research with o4-mini-deep-research — faster wall-clock than deep_research, still async.",
+        "description": "Concise background research — same model as deep_research with a briefer prompt; set max_tool_calls to bound cost.",
         "auto_input": False,
+        # o4-mini-deep-research (retired 2026-07-23) was this mode's cheap
+        # tier and has no cheaper replacement: OpenAI names gpt-5.6-sol for
+        # both retired models. This mode is now distinguished only by its
+        # system prompt. Deliberately no default `max_tool_calls` — an
+        # invented cap here would silently override limits users already set
+        # on this mode. Set one explicitly to bound cost.
     },
     "mini_research": {
         # P18 rename: `mini_research` → `quick_research`. Stub kept for one
@@ -83,7 +90,7 @@ BUILTIN_MODES = {
     },
     "exploration": {
         "provider": "openai",
-        "model": "o3-deep-research",
+        "model": "gpt-5.6-sol",
         "kind": "background",
         "system_prompt": "Explore the topic at hand, looking at options, alternatives, different trade-offs, and make recommendations based on the use case or alternative/related technologies.",
         "description": "Exploration looks at the topic at hand and explores some options and alternatives, different trade-offs, and makes recommendations based on the use case or just alternative and related technologies.",
@@ -92,7 +99,7 @@ BUILTIN_MODES = {
     },
     "deep_dive": {
         "provider": "openai",
-        "model": "o3-deep-research",
+        "model": "gpt-5.6-sol",
         "kind": "background",
         "system_prompt": "Deep dive into the specific technology, giving an overview, going deep on it, discussing it, and exploring it. For APIs, cover what the API is, how it works, assumptions, dependencies, if it's deprecated, common pitfalls. For other technologies, cover what the technology is and how it's used.",
         "description": "This deep dives into a specific technology, giving an overview of it, going deep on it, discussing it, and exploring it.",
@@ -101,7 +108,7 @@ BUILTIN_MODES = {
     },
     "tutorial": {
         "provider": "openai",
-        "model": "o3-deep-research",
+        "model": "gpt-5.6-sol",
         "kind": "background",
         "system_prompt": "Create a detailed tutorial with examples of how the technologies are used in common scenarios to get started, along with code samples, command-line execution process, and other useful information.",
         "description": "The tutorial goes into a detailed explanation with examples of how the technologies are used in common scenarios to get started.",
@@ -110,7 +117,7 @@ BUILTIN_MODES = {
     },
     "solution": {
         "provider": "openai",
-        "model": "o3-deep-research",
+        "model": "gpt-5.6-sol",
         "kind": "background",
         "system_prompt": "Design a specific solution to solve the given problem using appropriate technology. Focus on practical implementation.",
         "description": "A solution generally goes into a specific solution to solve a specific problem using technology.",
@@ -119,7 +126,7 @@ BUILTIN_MODES = {
     },
     "prd": {
         "provider": "openai",
-        "model": "o3-deep-research",
+        "model": "gpt-5.6-sol",
         "kind": "background",
         "system_prompt": "Create a Product Requirements Document based on prior research. Use previous research on solutions and technologies to create a comprehensive requirements document.",
         "description": "Product Requirements Document based on prior research, we'll create the PRD looking at previous research on solutions to technologies.",
@@ -128,7 +135,7 @@ BUILTIN_MODES = {
     },
     "tdd": {
         "provider": "openai",
-        "model": "o3-deep-research",
+        "model": "gpt-5.6-sol",
         "kind": "background",
         "system_prompt": "Create a Technical Design Document based on the PRD and prior research. Consider best practices on architecture and good abstractions to make things maintainable and well-structured in code.",
         "description": "The Technical Design Document based on the PRD and prior research puts together a technical design document.",
@@ -155,7 +162,7 @@ BUILTIN_MODES = {
     },
     "deep_research": {
         "provider": "openai",
-        "model": "o3-deep-research",
+        "model": "gpt-5.6-sol",
         "kind": "background",
         "providers": ["openai"],
         "parallel": True,
@@ -166,7 +173,7 @@ BUILTIN_MODES = {
     },
     "comparison": {
         "provider": "openai",
-        "model": "o3-deep-research",
+        "model": "gpt-5.6-sol",
         "kind": "background",
         "system_prompt": "Compare and contrast the given options, technologies, or approaches. Provide a detailed analysis of pros, cons, and recommendations.",
         "description": "Comparative analysis mode for evaluating multiple options.",
@@ -342,7 +349,7 @@ BUILTIN_MODES = {
             "Fans one prompt out to all three providers concurrently, each "
             "using its own Deep Research model."
         ),
-        "openai": {"model": "o3-deep-research"},
+        "openai": {"model": "gpt-5.6-sol"},
         "perplexity": {"model": "sonar-deep-research"},
         "gemini": {"model": "deep-research-preview-04-2026"},
     },
@@ -358,12 +365,28 @@ BUILTIN_MODES = {
 }
 
 
-def is_background_model(model: str | None) -> bool:
-    """Return True if a model name implies background/long-running submission.
+#: Background-capable models whose IDs do not carry the "deep-research"
+#: substring. OpenAI retired o3-deep-research and o4-mini-deep-research on
+#: 2026-07-23 and names gpt-5.6-sol as their replacement; that ID encodes no
+#: capability, so the naming convention below cannot classify it and every
+#: such model must be registered here explicitly.
+BACKGROUND_MODELS: frozenset[str] = frozenset(
+    {
+        "gpt-5.6",  # documented alias for -sol; does not resolve on all accounts
+        "gpt-5.6-sol",
+    }
+)
 
-    Rule: any model name containing the substring "deep-research" is treated
-    as background. Case-sensitive by design (OpenAI model IDs are lowercase).
-    `None` and empty string return False.
+
+def is_background_model(model: str | None) -> bool:
+    """Return True if a model implies background/long-running submission.
+
+    Two rules, in order: an exact match against `BACKGROUND_MODELS`, then any
+    model name containing the substring "deep-research". The substring rule
+    still classifies Gemini's `deep-research-preview-*` agents and Perplexity's
+    `sonar-deep-research`, which do follow the convention. Both rules are
+    case-sensitive by design (provider model IDs are lowercase). `None` and
+    empty string return False.
 
     P18 keeps this helper as the model-level source of truth for "what does
     *this provider* require for *this model*?" — used inside the OpenAI
@@ -371,7 +394,98 @@ def is_background_model(model: str | None) -> bool:
     inside `progress.py:should_show_spinner`. Resolution-path callers should
     use `mode_kind(cfg)` instead.
     """
+    name = model or ""
+    return name in BACKGROUND_MODELS or "deep-research" in name
+
+
+#: Non-o-series models that reject the `temperature` request parameter.
+#: There is no capability-discovery endpoint for this, and no derivable
+#: pattern: verified live on 2026-09-08, gpt-5 and gpt-5.5 reject temperature
+#: while gpt-5.1, gpt-5.2 and gpt-5.4 accept it. A `gpt-5*` prefix rule is
+#: therefore wrong in both directions, so this list records measurements
+#: rather than a guess and must be extended as models appear.
+NO_TEMPERATURE_MODELS: frozenset[str] = frozenset(
+    {
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-5-nano",
+        "gpt-5.5",
+        "gpt-5.6",  # alias for -sol; kept consistent with it
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-6-astra",
+    }
+)
+
+
+#: Reasoning-effort values above "none". Only these suppress `temperature`;
+#: "none" and any unrecognised value leave it in place. Verified live
+#: 2026-09-08 that gpt-5.2 rejects temperature at "low", "medium" and "high",
+#: and accepts it at "none" or with no reasoning block.
+RAISED_REASONING_EFFORTS: frozenset[str] = frozenset({"low", "medium", "high", "xhigh", "max"})
+
+_O_SERIES_RE = re.compile(r"^o\d")
+
+
+def _is_o_series(model: str) -> bool:
+    r"""True for OpenAI reasoning models named o1/o3/o4-mini and friends.
+
+    Matches `^o\d` rather than a bare "o" prefix, which also caught unrelated
+    names such as "omni-1" and "openai-foo" and wrongly dropped their
+    temperature. Case-sensitive by design: provider model IDs are lowercase,
+    so "O3" is not a real ID and would fail as `model_not_found` regardless.
+    """
+    return bool(_O_SERIES_RE.match(model))
+
+
+def requires_background_submission(model: str | None) -> bool:
+    """Return True if `model` *cannot* run on the immediate/streaming path.
+
+    Deliberately narrower than `is_background_model()`, which answers "should
+    this default to background research?". The retired o3/o4-mini
+    deep-research models and the Gemini deep-research agents offer no
+    synchronous mode, so `kind = "immediate"` for them is a config error worth
+    refusing before any HTTP call.
+
+    gpt-5.6-sol is different: a general-purpose model that OpenAI supports
+    streaming. It belongs in `BACKGROUND_MODELS` so research modes default to
+    background submission with tools, but forbidding immediate use of it would
+    be wrong. Conflating the two meant registering the replacement model
+    silently removed a capability the model has.
+    """
     return "deep-research" in (model or "")
+
+
+def supports_temperature(model: str | None, reasoning_effort: str | None = None) -> bool:
+    """Return True if this request may carry the `temperature` parameter.
+
+    Support depends on the model *and* the effective reasoning effort, which
+    is why `reasoning_effort` is part of the signature:
+
+    - Every o-series reasoning model rejects temperature outright.
+    - The models in `NO_TEMPERATURE_MODELS` reject it outright.
+    - Models that otherwise accept it reject it once reasoning effort rises
+      above "none". Verified live 2026-09-08: gpt-5.2 and gpt-5.4 accept
+      temperature at effort "none" or unset, and reject it at "low" and "high".
+
+    Unknown models with no raised effort default to *sending* temperature.
+    That is deliberate: an unsupported parameter fails loudly with
+    "Unsupported parameter: 'temperature' is not supported with this model",
+    which is diagnosable, whereas silently discarding a configured temperature
+    changes sampling with no signal. The rejection surfaces only on a real
+    call against the live API; a request with empty `input` short-circuits on
+    the missing input before reaching the
+    compatibility check.
+    """
+    name = model or ""
+    if _is_o_series(name) or name in NO_TEMPERATURE_MODELS:
+        return False
+    # Only a *recognised, raised* effort suppresses temperature. An
+    # unrecognised value (a typo, or an empty string) must not silently change
+    # sampling: leaving temperature in place lets the API reject the bad
+    # effort loudly, which is the diagnosable failure.
+    return reasoning_effort not in RAISED_REASONING_EFFORTS
 
 
 def mode_kind(mode_config: dict[str, Any]) -> str:

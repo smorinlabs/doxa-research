@@ -66,6 +66,7 @@ PROVIDER_NATIVE_REQUEST_KEYS: frozenset[str] = frozenset(
         "stop",
         "stream_mode",
         "thinking_budget",
+        "tool_choice",
         "tools",
         "top_k",
         "web_search",

@@ -219,6 +219,12 @@ class OpenAIConfig(ProviderConfigBase):
     max_tool_calls: int | None = None
     code_interpreter: bool | None = None
     background: bool | None = None
+    reasoning_effort: Literal["none", "low", "medium", "high", "xhigh", "max"] | None = None
+    # str ("auto"/"required"/"none") or a dict naming one tool, e.g.
+    # {"type": "web_search"} — the shape the request builder actually sends.
+    tool_choice: str | dict[str, Any] | None = None
+    web_search: bool | None = None
+    reasoning_summary: str | None = None
 
 
 class PerplexityConfig(ProviderConfigBase):

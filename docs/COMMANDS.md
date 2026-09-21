@@ -66,7 +66,7 @@ Use `--project` to write to `./doxa.config.toml` instead of the user-tier file.
 | Subcommand | Description | Example |
 |------------|-------------|---------|
 | `list` | List research modes (filter with `--kind`, `--source`, `--name`; supports `--json`) | `doxa modes list --kind background` |
-| `add NAME --model MODEL [--description D] [--kind K]` | Define a new mode | `doxa modes add my_mode --model o3-deep-research --kind background` |
+| `add NAME --model MODEL [--description D] [--kind K]` | Define a new mode | `doxa modes add my_mode --model gpt-5.6-sol --kind background` |
 | `set NAME KEY VALUE` | Set a key on mode `NAME` | `doxa modes set my_mode temperature 0.3` |
 | `unset NAME KEY` | Remove a key from mode `NAME` | `doxa modes unset my_mode temperature` |
 | `remove NAME` | Delete a custom mode | `doxa modes remove my_mode` |
@@ -88,15 +88,15 @@ These ship with `doxa init`. List them at runtime with `doxa modes list`
 |---|---|---|
 | `default` | `o3` (OpenAI) | Plain question answering, no system prompt |
 | `clarification` | `o3` | Asks Doxa for clarifying questions before research |
-| `quick_research` | `o4-mini-deep-research` | Cheaper, faster Deep Research |
-| `exploration` | `o3-deep-research` | Open-ended exploratory research |
-| `deep_dive` | `o3-deep-research` | In-depth research dive |
-| `tutorial` | `o3-deep-research` | Tutorial-format output |
-| `solution` | `o3-deep-research` | Solution-recommendation output |
-| `prd` | `o3-deep-research` | PRD-style design document |
-| `tdd` | `o3-deep-research` | TDD plan / implementation outline |
-| `comparison` | `o3-deep-research` | Comparison-table output |
-| `deep_research` | `o3-deep-research` | Exhaustive Deep Research |
+| `quick_research` | `gpt-5.6-sol` | Concise Deep Research; set `max_tool_calls` to bound cost |
+| `exploration` | `gpt-5.6-sol` | Open-ended exploratory research |
+| `deep_dive` | `gpt-5.6-sol` | In-depth research dive |
+| `tutorial` | `gpt-5.6-sol` | Tutorial-format output |
+| `solution` | `gpt-5.6-sol` | Solution-recommendation output |
+| `prd` | `gpt-5.6-sol` | PRD-style design document |
+| `tdd` | `gpt-5.6-sol` | TDD plan / implementation outline |
+| `comparison` | `gpt-5.6-sol` | Comparison-table output |
+| `deep_research` | `gpt-5.6-sol` | Exhaustive Deep Research |
 | `thinking` | `o3` | Reasoning model, no deep-research overhead |
 
 The chain `exploration` → `deep_dive` → `tutorial` → `solution` → `prd` → `tdd`
@@ -107,7 +107,7 @@ Research workflows where each stage's output can feed the next.
 
 | Mode | Kind | Per-provider models | Notes |
 |---|---|---|---|
-| `all_deep_research` | background | openai → `o3-deep-research`, perplexity → `sonar-deep-research`, gemini → `deep-research-preview-04-2026` | Parallel **Deep Research** across all three providers. Each provider runs concurrently with its own Deep Research model and writes its own output file under `./research-outputs/`. Used by the `all_deep` starter profile. |
+| `all_deep_research` | background | openai → `gpt-5.6-sol`, perplexity → `sonar-deep-research`, gemini → `deep-research-preview-04-2026` | Parallel **Deep Research** across all three providers. Each provider runs concurrently with its own Deep Research model and writes its own output file under `./research-outputs/`. Used by the `all_deep` starter profile. |
 
 Multi-provider fan-out requires `kind: background`. Immediate modes are
 single-provider by design — the CLI rejects any immediate mode declared

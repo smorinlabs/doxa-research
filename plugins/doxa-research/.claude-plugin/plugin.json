@@ -1,6 +1,6 @@
 {
   "name": "doxa-research",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Run fully formed research prompts through Doxa's single- or multi-provider deep-research workflows.",
   "author": {
     "name": "Steve Morin"

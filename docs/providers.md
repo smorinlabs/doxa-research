@@ -46,7 +46,12 @@ All OpenAI settings can be configured in
 api_key = "${OPENAI_API_KEY}"  # API key (required)
 model = "o3"                    # Model to use (default: o3 for general modes)
 timeout = 30.0                  # Request timeout in seconds (default: 30.0)
-temperature = 0.7               # Creativity/randomness, 0.0–2.0 (ignored by o3/o3-deep-research)
+temperature = 0.7               # Creativity/randomness, 0.0–2.0. Omitted automatically where
+                                # unsupported: o-series (o1/o3/o4-…) models, the specific IDs in
+                                # NO_TEMPERATURE_MODELS (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.5,
+                                # gpt-5.6/-sol/-luna/-terra, gpt-6-astra), and any request whose
+                                # reasoning_effort is low/medium/high/xhigh/max. gpt-5.1, gpt-5.2
+                                # and gpt-5.4 DO accept it at effort "none" or with no effort set.
 max_tokens = 4000               # Maximum response tokens (default: 4000)
 ```
 
@@ -56,15 +61,37 @@ Doxa Research ships these OpenAI models in its built-in catalog:
 
 - `o3` — Reasoning model used by the `default`, `clarification`, and
   `openai_reasoning` modes.
-- `o3-deep-research` — Deep-research model used by the `deep_research`,
-  `exploration`, `deep_dive`, `tutorial`, `solution`, `prd`, and `tdd`
-  modes.
-- `o4-mini-deep-research` — Lower-cost deep-research variant used by the
-  `quick_research` mode.
+- `gpt-5.6-sol` — General-purpose flagship used for Deep Research by the
+  `deep_research`, `exploration`, `deep_dive`, `tutorial`, `solution`, `prd`,
+  `tdd`, `comparison`, and `quick_research` modes. It replaced
+  `o3-deep-research` and `o4-mini-deep-research`, which OpenAI shut down on
+  2026-07-23. Because it is general-purpose rather than a research-first
+  agent, Doxa supplies the research behaviour those models had built in: the
+  `web_search` tool, `tool_choice = {type = "web_search"}` so the model cannot
+  answer without searching, and `reasoning_effort = "max"` — the top of the
+  `none`/`low`/`medium`/`high`/`xhigh`/`max` scale, where the API's own default
+  is `medium`. This buys the deepest available research and is correspondingly
+  the most expensive setting; no measured `medium`-versus-`max` quality
+  comparison exists, so set `reasoning_effort` on a mode to lower it. Setting `web_search = false` on a mode omits the tool and the
+  default choice, for modes that synthesise from supplied material; an
+  explicitly configured `tool_choice` is still sent. `quick_research` has no
+  cheaper replacement model and no default tool-call cap; set `max_tool_calls`
+  yourself to bound its cost.
+
+> **These defaults apply to background submission only.** A `kind = "immediate"`
+> mode goes through the streaming path, which defaults to no reasoning effort
+> (so the API's own `medium`), no forced `tool_choice`, no `code_interpreter`,
+> and `web_search = false`. Values you set explicitly — `reasoning_effort`,
+> `tool_choice`, `temperature`, `web_search` — are honoured on both paths; only
+> the defaults differ. If you want research-grade depth from an immediate mode,
+> set those keys yourself rather than relying on the background defaults.
 
 Run `doxa providers models -P openai` to list models live from the API
 (includes any additional models your OpenAI account exposes — Doxa will
-accept them but the built-in modes are tuned for the three above).
+accept them but the built-in modes are tuned for the models above). Retired
+models keep appearing in that listing, so the table marks them: a `Status` of
+`retired <date>` means the ID resolves in the catalogue but every call to it
+fails with `model_not_found`.
 
 ### CLI options
 

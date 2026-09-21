@@ -1,6 +1,6 @@
 [project]
 name = "doxa-research"
-version = "3.1.2"
+version = "3.3.0"
 description = "AI-Powered Research Assistant — orchestrates parallel LLM providers for comprehensive research reports"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -29,7 +29,10 @@ classifiers = [
 ]
 dependencies = [
     "click>=8.3.3",
-    "openai>=2.36.0",
+    # <3 until the httpx2 migration (P43): openai 3.x makes httpx2 the default
+    # transport and drops httpx, while providers/ still construct httpx clients
+    # and hand httpx.Timeout to AsyncOpenAI.
+    "openai>=2.36.0,<3",
     "httpx>=0.27.0",
     "rich>=13.7",
     "aiofiles>=25.1.0",
@@ -38,7 +41,9 @@ dependencies = [
     "prompt-toolkit>=3.0",
     "tomlkit>=0.13",
     "thothspinner>=1.2.6",
-    "google-genai>=1.74.0",
+    # >=2.0.0: Google retired the legacy Interactions API schema, so 1.x now
+    # fails every Deep Research call with HTTP 400 telling you to upgrade.
+    "google-genai>=2.0.0",
     "pydantic>=2.12.5,<3",
 ]
 

@@ -769,7 +769,7 @@ def test_copy_builtin_src_writes_effective_config(
     cfg = (Path(isolated_doxa_home) / "config" / "doxa" / "doxa.config.toml").read_text()
     assert "[modes.my_research]" in cfg
     # deep_research's model is o3-deep-research per BUILTIN_MODES
-    assert 'model = "o3-deep-research"' in cfg
+    assert 'model = "gpt-5.6-sol"' in cfg
 
 
 def test_copy_user_only_src(isolated_doxa_home: Path) -> None:  # TS06b
@@ -798,7 +798,7 @@ def test_copy_overridden_src_writes_effective(
     # DST should have the override value, not the builtin default
     assert "parallel = false" in cfg
     # And the builtin's other keys (model)
-    assert 'model = "o3-deep-research"' in cfg
+    assert 'model = "gpt-5.6-sol"' in cfg
 
 
 def test_copy_dst_builtin_without_override_dst_taken(

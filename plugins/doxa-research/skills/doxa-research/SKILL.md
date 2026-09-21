@@ -1,6 +1,6 @@
 ---
 name: doxa-research
-description: Operate the Doxa Research CLI for approved research execution. Use only when the user explicitly says "use Doxa" or "Doxa Research", asks to run, resume, check, or cancel a Doxa job, or an established plan has already selected Doxa to execute `.prompt.md` files. Handles preflight, provider/mode selection, paid-run confirmation, background monitoring, and output/provenance capture. Do not trigger for generic deep-research or research-planning requests; guided-research owns framing and lineage, while this skill owns Doxa execution.
+description: Operate the Doxa Research CLI to run, resume, check, or cancel approved research jobs, with paid-run confirmation and provenance capture. Use only when the user explicitly says "use Doxa" or "Doxa Research", or a plan has already selected Doxa to execute .prompt.md files. Not for framing or planning research (guided-research).
 allowed-tools: Read, Bash
 ---
 

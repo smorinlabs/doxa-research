@@ -81,7 +81,7 @@ try-import + duck-type fallback predicate at module top:
 
 ```python
 try:
-    from google.genai._interactions import GeminiNextGenAPIClientError as _IExc
+    from google.genai._gaos.lib.compat_errors import GeminiNextGenAPIClientError as _IExc
     _HAS_IEXC = True
 except ImportError:
     _HAS_IEXC = False
@@ -141,10 +141,10 @@ intentional, not consolidation drift.
 |---|---|
 | **SDK** | Official `openai` Python SDK. Auth-key URL: `https://platform.openai.com/api-keys`. |
 | **Background path** | `client.responses.create(model=..., input=..., background=True)` returns `resp_*` ID. Poll via `client.responses.retrieve(id)`. |
-| **Models** | `o3-deep-research`, `o4-mini-deep-research` (background). Standard chat models (immediate). |
+| **Models** | `gpt-5.6-sol` — defaults to background research via `BACKGROUND_MODELS`, but also streams; only `requires_background_submission()` models (the retired `*-deep-research` IDs) are refused on the immediate path. Standard chat models (immediate). |
 | **Error hierarchy** | Public via `openai.<ErrorClass>` (`AuthenticationError`, `RateLimitError`, etc.). No private-module quirk. |
 | **Citations** | On response output annotations. See `openai.py` `_render_sources` and the annotation extraction loop. |
-| **Mode-config support** | `max_tool_calls`, `code_interpreter`, `organization` all consumed. |
+| **Mode-config support** | `max_tool_calls`, `code_interpreter`, `organization`, `reasoning_effort`, `tool_choice`, `web_search`, `reasoning_summary` all consumed. Note `submit()` and `stream()` default differently — see the divergence note below. |
 | **Polling cadence** | 30s default (P26). |
 
 ## Perplexity (`perplexity.py`)
@@ -168,14 +168,18 @@ non-obvious quirks.
 
 | Topic | Notes |
 |---|---|
-| **SDK package** | `google-genai>=1.74.0`. Auth-key URL: `https://aistudio.google.com/app/apikey`. Tier: paid Tier 1+ required for Deep Research. |
+| **SDK package** | `google-genai>=2.0.0` (2.x required: Google retired the legacy Interactions schema, so 1.x fails every Deep Research call at create time). Auth-key URL: `https://aistudio.google.com/app/apikey`. Tier: paid Tier 1+ required for Deep Research. |
 | **Immediate path** | `client.aio.models.generate_content[_stream](model=..., contents=..., config=...)`. P24's territory. |
 | **Background path (Deep Research)** | `client.aio.interactions.create(agent=..., input=..., background=True, store=True)`. P28's territory. ASYNC-ONLY surface (no sync equivalent). |
 | **Hybrid class** | `GeminiProvider` routes between immediate and DR based on `is_background_model(self.model)`. See "Hybrid routing" section above. |
 
 ### Deep Research exception hierarchy (PRIVATE MODULE)
 
-DR exceptions live in **private** module `google.genai._interactions`:
+DR exceptions live in a **private** SDK module whose path moved in
+google-genai 2.0: 1.x used `google.genai._interactions`, 2.x uses
+`google.genai._gaos.lib.compat_errors`. `gemini.py` resolves it newest-first
+and `_is_interactions_error()` keeps a duck-type fallback, so a further move
+degrades classification instead of breaking the import:
 
 ```
 GeminiNextGenAPIClientError  <-  Exception   (NOT inherited from google.genai.errors.APIError)
@@ -211,7 +215,8 @@ GeminiNextGenAPIClientError  <-  Exception   (NOT inherited from google.genai.er
 | **Layered citation rendering** | (1) parse SDK Sources block for `{redirect_url: domain_title}`. (2) Bounded-concurrency HEAD-follow each redirect URL to get source URL. (3) Title-derivation chain: `parsed_sources.get → urlparse(source).netloc → URL`. (4) Dedupe by final URL. See `_resolve_dr_redirects` in `gemini.py`. |
 | **Polling cadence and timeout** | Schema-only in v1: `[providers.gemini].poll_interval = 10` and `.max_wait_minutes = 60`. Runtime still reads `[execution].poll_interval` (default 30s) and `.max_wait` (default 30min). Set `[execution].max_wait = 60` for DR users (upstream hard limit is 60 min). v1.1 will wire the per-provider override. |
 | **Retention windows** | Paid tier: 55 days. Free tier: 1 day (but DR is paid-only). `interactions.get()` on expired ID → `NotFoundError(404)` → mapped to "interaction expired" message via `_map_gemini_error`. |
-| **`is_background_model("deep-research-...")` returns True** | Substring match on "deep-research" (see `config.py`). Covers all three DR agent IDs. |
+| **`is_background_model("deep-research-...")` returns True** | Substring match on "deep-research" (see `config.py`). Covers the Gemini DR agent IDs and `sonar-deep-research`. |
+| **`is_background_model("gpt-5.6-sol")` returns True** | Exact match against `BACKGROUND_MODELS` in `config.py`. OpenAI's replacement for the retired DR models encodes no capability in its ID, so the substring rule cannot classify it and every such model must be registered explicitly. |
 | **Pricing (preview)** | Fast tier $1-3/task, max tier $3-7/task. Free tier ineligible. |
 
 ### Cancel behavior (defensive)

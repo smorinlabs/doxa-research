@@ -217,9 +217,28 @@ def test_gemini_build_generate_content_config_include_thoughts_only_defaults_thi
 # Task 4.3: error mapping + retry policy
 # ---------------------------------------------------------------------------
 
+import importlib  # noqa: E402
 from unittest.mock import MagicMock  # noqa: E402
 
 import pytest  # noqa: E402
+
+
+def _sdk_interactions_errors():
+    """Resolve the SDK's private Interactions error module across versions.
+
+    These exception types do not inherit from ``google.genai.errors.APIError``,
+    so the tests need the real classes. google-genai 1.x exposed them at
+    ``google.genai._interactions``; 2.0 moved the same names to
+    ``google.genai._gaos.lib.compat_errors``. Resolve newest-first rather than
+    importing one path directly, so a future move fails one skip instead of
+    every test in this class.
+    """
+    for name in ("google.genai._gaos.lib.compat_errors", "google.genai._interactions"):
+        try:
+            return importlib.import_module(name)
+        except ImportError:
+            continue
+    pytest.skip("SDK private Interactions error module not found")
 
 
 def _make_gemini_client_error(code: int, status: str, message: str, details: list | None = None):
@@ -1158,7 +1177,7 @@ def test_gemini_kind_mismatch_no_kind_in_config_no_op() -> None:
 
 
 class TestMapGeminiErrorInteractionsSpecific:
-    """Task 2: _map_gemini_error catches google.genai._interactions exceptions."""
+    """Task 2: _map_gemini_error catches the SDK's private Interactions exceptions."""
 
     def _make_interactions_request(self):  # type: ignore[return]
         import httpx
@@ -1168,7 +1187,8 @@ class TestMapGeminiErrorInteractionsSpecific:
     def test_interactions_404_produces_interaction_expired_message(self):
         """interactions.get(bad-id) raises NotFoundError with status_code=404."""
         import httpx
-        from google.genai._interactions import NotFoundError  # type: ignore[import-not-found]
+
+        NotFoundError = _sdk_interactions_errors().NotFoundError
 
         from doxa_research.providers.gemini import _map_gemini_error
 
@@ -1187,7 +1207,8 @@ class TestMapGeminiErrorInteractionsSpecific:
     def test_interactions_400_invalid_key_produces_api_key_error(self):
         """interactions.create with bad key raises BadRequestError with status_code=400."""
         import httpx
-        from google.genai._interactions import BadRequestError  # type: ignore[import-not-found]
+
+        BadRequestError = _sdk_interactions_errors().BadRequestError
 
         from doxa_research.errors import APIKeyError, DoxaError
         from doxa_research.providers.gemini import _map_gemini_error
@@ -1205,7 +1226,8 @@ class TestMapGeminiErrorInteractionsSpecific:
     def test_interactions_500_produces_provider_error(self):
         """interactions.{create,get,cancel} 5xx raises InternalServerError."""
         import httpx
-        from google.genai._interactions import InternalServerError  # type: ignore[import-not-found]
+
+        InternalServerError = _sdk_interactions_errors().InternalServerError
 
         from doxa_research.errors import ProviderError
         from doxa_research.providers.gemini import _map_gemini_error
@@ -1224,7 +1246,8 @@ class TestMapGeminiErrorInteractionsSpecific:
     def test_interactions_429_produces_rate_limit_error(self):
         """interactions.* 429 maps to APIRateLimitError."""
         import httpx
-        from google.genai._interactions import RateLimitError  # type: ignore[import-not-found]
+
+        RateLimitError = _sdk_interactions_errors().RateLimitError
 
         from doxa_research.errors import APIRateLimitError
         from doxa_research.providers.gemini import _map_gemini_error
@@ -1238,9 +1261,8 @@ class TestMapGeminiErrorInteractionsSpecific:
     def test_interactions_403_dr_tier_gives_pricing_hint(self):
         """403 with tier/paid wording AND a deep-research model surfaces pricing URL."""
         import httpx
-        from google.genai._interactions import (
-            PermissionDeniedError,  # type: ignore[import-not-found]
-        )
+
+        PermissionDeniedError = _sdk_interactions_errors().PermissionDeniedError
 
         from doxa_research.errors import ProviderError
         from doxa_research.providers.gemini import _map_gemini_error
@@ -1255,9 +1277,8 @@ class TestMapGeminiErrorInteractionsSpecific:
     def test_interactions_403_non_dr_model_no_pricing_hint(self):
         """403 on a non-DR model gives a plain permission-denied (no pricing URL)."""
         import httpx
-        from google.genai._interactions import (
-            PermissionDeniedError,  # type: ignore[import-not-found]
-        )
+
+        PermissionDeniedError = _sdk_interactions_errors().PermissionDeniedError
 
         from doxa_research.providers.gemini import _map_gemini_error
 
@@ -1271,7 +1292,8 @@ class TestMapGeminiErrorInteractionsSpecific:
     def test_interactions_401_invalid_key_produces_api_key_error(self):
         """401 with key-related message routes via _invalid_key_doxaerror or APIKeyError."""
         import httpx
-        from google.genai._interactions import AuthenticationError  # type: ignore[import-not-found]
+
+        AuthenticationError = _sdk_interactions_errors().AuthenticationError
 
         from doxa_research.errors import APIKeyError, DoxaError
         from doxa_research.providers.gemini import _map_gemini_error
@@ -1287,7 +1309,8 @@ class TestMapGeminiErrorInteractionsSpecific:
     def test_interactions_401_generic_gives_api_key_error(self):
         """401 without key-phrase routes to APIKeyError."""
         import httpx
-        from google.genai._interactions import AuthenticationError  # type: ignore[import-not-found]
+
+        AuthenticationError = _sdk_interactions_errors().AuthenticationError
 
         from doxa_research.errors import APIKeyError
         from doxa_research.providers.gemini import _map_gemini_error
@@ -1796,7 +1819,8 @@ class TestGeminiReconnect:
             from unittest.mock import AsyncMock, MagicMock
 
             import httpx
-            from google.genai._interactions import NotFoundError
+
+            NotFoundError = _sdk_interactions_errors().NotFoundError
 
             from doxa_research.errors import ProviderError
             from doxa_research.providers.gemini import GeminiProvider
@@ -1884,7 +1908,8 @@ class TestGeminiCancel:
             from unittest.mock import AsyncMock, MagicMock
 
             import httpx
-            from google.genai._interactions import InternalServerError
+
+            InternalServerError = _sdk_interactions_errors().InternalServerError
 
             from doxa_research.providers.gemini import GeminiProvider
 
@@ -1933,7 +1958,8 @@ class TestGeminiCancel:
             from unittest.mock import AsyncMock, MagicMock
 
             import httpx
-            from google.genai._interactions import NotFoundError
+
+            NotFoundError = _sdk_interactions_errors().NotFoundError
 
             from doxa_research.providers.gemini import GeminiProvider
 

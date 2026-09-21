@@ -2,6 +2,61 @@
 
 All notable changes to Doxa Research are documented here.
 
+## [3.3.0](https://github.com/smorinlabs/doxa-research/compare/v3.2.1...v3.3.0) (2026-09-09)
+
+
+### Features
+
+* **openai:** default background research to reasoning_effort "max" ([0999893](https://github.com/smorinlabs/doxa-research/commit/09998933c38ccb47d3698a6556c956c8fa357dba))
+* **openai:** migrate to gpt-5.6-sol after the deep-research shutdown ([062a94f](https://github.com/smorinlabs/doxa-research/commit/062a94f7c06e95116fa3333ef428837547338a60))
+* **openai:** migrate to gpt-5.6-sol after the deep-research shutdown ([e2513e8](https://github.com/smorinlabs/doxa-research/commit/e2513e833cd4a2e4a1f2f757f0f542a65412086a))
+
+
+### Bug Fixes
+
+* **openai:** address second-round review findings on the sol migration ([5335f96](https://github.com/smorinlabs/doxa-research/commit/5335f9664e684f9b1ae41caad07be9f79edd6475))
+* **openai:** address the Muse review of the sol migration ([de9bbd1](https://github.com/smorinlabs/doxa-research/commit/de9bbd1ce850c36ba47d0b4f3d7c8a24fc13b7cf))
+* **openai:** gate the research defaults on background submission ([5ee8794](https://github.com/smorinlabs/doxa-research/commit/5ee8794b9848c0a99bf502a16b39a8ca60bcddde))
+* **openai:** honour declared immediate kind and empty tool sets ([786b596](https://github.com/smorinlabs/doxa-research/commit/786b5962316e34671ab805e24f6cb05ecb121550))
+* **openai:** resolve the automated review findings on PR 147 ([7db526d](https://github.com/smorinlabs/doxa-research/commit/7db526d1112b08fc333baf0143c045c688a40130))
+
+
+### Documentation
+
+* **projects:** fix the P43 task ordering and verification gates ([99b2bda](https://github.com/smorinlabs/doxa-research/commit/99b2bda19dd455f0d48b6d360cc7f32fdd6cbca5))
+* **projects:** resolve the automated review findings on P43 ([b93634e](https://github.com/smorinlabs/doxa-research/commit/b93634e125a94181d2573173049564a1086a44f9))
+* **projects:** schedule P43, the httpx2 migration and openai 3.x upgrade ([d1fcf38](https://github.com/smorinlabs/doxa-research/commit/d1fcf38835e9e5a811c2d1208577381b7770e995))
+* **projects:** schedule P43, the httpx2 migration and openai 3.x upgrade ([396c70c](https://github.com/smorinlabs/doxa-research/commit/396c70cefe89b5b9e81ca548f8e0bd06c100fe3a))
+* **projects:** scope the httpx goal and fix the P43 verification gates ([8d10259](https://github.com/smorinlabs/doxa-research/commit/8d10259890f68f64f1051af6e2ae079c26c0f163))
+
+## [3.2.1](https://github.com/smorinlabs/doxa-research/compare/v3.2.0...v3.2.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **gemini:** raise the standalone launcher's SDK floor too ([d0f85e4](https://github.com/smorinlabs/doxa-research/commit/d0f85e40e41bd2e17fd7e469591d51e298372552))
+* **gemini:** require google-genai&gt;=2.0.0 for the new Interactions schema ([2a0fa8f](https://github.com/smorinlabs/doxa-research/commit/2a0fa8ffe4ddb5360787c92eb6efb9fe7b6e0a1b))
+* **gemini:** require google-genai&gt;=2.0.0 for the new Interactions schema ([74497d8](https://github.com/smorinlabs/doxa-research/commit/74497d8c4a4d5aa6fabaf1db8ded032d3ca52718))
+
+
+### Documentation
+
+* --ff-only is the primary sync, --rebase the fallback ([8dd2c24](https://github.com/smorinlabs/doxa-research/commit/8dd2c243495fc927ca57a8a9158076a0c1c52078))
+* --ff-only is the primary sync, --rebase the fallback ([73dffd5](https://github.com/smorinlabs/doxa-research/commit/73dffd519b5133ddab983788864cb7bbb869c199))
+* **gemini:** correct the SDK floor in the providers guide ([7ddda8d](https://github.com/smorinlabs/doxa-research/commit/7ddda8dd0d47b5d57292da9965759836382304af))
+
+## [3.2.0](https://github.com/smorinlabs/doxa-research/compare/v3.1.2...v3.2.0) (2026-07-19)
+
+
+### Features
+
+* add Doxa Research skill and complete org migration ([263d49c](https://github.com/smorinlabs/doxa-research/commit/263d49cf5133b20f6c8e6052b12b50c7ab7bfbef))
+
+
+### Documentation
+
+* **p40:** mark P40 complete post-merge ([d55bd2d](https://github.com/smorinlabs/doxa-research/commit/d55bd2d85dcba838762f2ba36946b13b0e21d625))
+
 ## [3.1.2](https://github.com/smorin/doxa-research/compare/v3.1.1...v3.1.2) (2026-06-17)
 
 
