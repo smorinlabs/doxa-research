@@ -115,6 +115,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
+      # Pre-sync once, serially: ./doxa is a shim over `uv run`, and
+      # doxa_test -j auto spawns it concurrently. Concurrent `uv run` on a
+      # cold .venv races the initial sync, so losers exec a half-built venv
+      # (`.venv/bin/python: can't open file '.venv/bin/doxa'`, exit 2).
+      # A warm venv needs no per-invocation sync, closing the window.
+      - name: Sync environment
+        run: uv sync --frozen
       - name: Run tests (mock provider only)
         env:
           MOCK_API_KEY: ci-test-key
