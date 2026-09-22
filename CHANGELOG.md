@@ -2,6 +2,37 @@
 
 All notable changes to Doxa Research are documented here.
 
+## [3.3.1](https://github.com/smorinlabs/doxa-research/compare/v3.3.0...v3.3.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **deps:** align pydantic-core with pydantic ([8a6070d](https://github.com/smorinlabs/doxa-research/commit/8a6070db5728bfe19c125bdf94ecc438d858e8dd))
+* **deps:** sync the doxa launcher manifest and bound the openai major ([377403d](https://github.com/smorinlabs/doxa-research/commit/377403d7c0a5129f82496bd0720e65079c436cc1))
+* **launcher:** drop no-sync from the shim so a fresh checkout still works ([622d9aa](https://github.com/smorinlabs/doxa-research/commit/622d9aa10d968a6f4fb947a5e7caa1a9c5838a0a))
+* **launcher:** stop install-bin copying the shim, and freeze the shim's resolve ([3bb427b](https://github.com/smorinlabs/doxa-research/commit/3bb427b284b5c83c4383c30d02f8ee8c7907166c))
+
+
+### Dependencies
+
+* bump anyio from 4.13.0 to 4.15.1 ([aec191b](https://github.com/smorinlabs/doxa-research/commit/aec191ba84139f430956061bd54d3aee5a2c8762))
+* bump certifi from 2026.5.20 to 2026.7.22 ([70877ba](https://github.com/smorinlabs/doxa-research/commit/70877ba4b60e8195b5151410c1cca17b4d5f4bd1))
+* bump click from 8.4.1 to 8.5.0 ([2ec2787](https://github.com/smorinlabs/doxa-research/commit/2ec278759abc3b5190ea25ec7672a3eac84f6841))
+* bump github/codeql-action from 4.36.2 to 4.38.0 ([80c9d48](https://github.com/smorinlabs/doxa-research/commit/80c9d480ce08934699642ed4306af0058b6137a1))
+* bump idna from 3.16 to 3.19 ([4ce3f0e](https://github.com/smorinlabs/doxa-research/commit/4ce3f0ec8cc55764a078a6632c995fd6b948e272))
+* bump jiter in the openai-stack group across 1 directory ([3766dfd](https://github.com/smorinlabs/doxa-research/commit/3766dfdbd14949cea49740f1407e52e20dcdf682))
+* bump platformdirs from 4.9.6 to 4.11.7 ([ee12bba](https://github.com/smorinlabs/doxa-research/commit/ee12bbaecc6045d5d6efbfe0151a9f9b7d151bf6))
+* bump pygments from 2.20.0 to 2.21.0 ([61e79d2](https://github.com/smorinlabs/doxa-research/commit/61e79d28d10bc751dc4e4f5c21f7de39b3781ecc))
+* bump the pydantic-stack group across 1 directory with 4 updates ([b8f5b7e](https://github.com/smorinlabs/doxa-research/commit/b8f5b7e243abb058af7f6624871a531dc8d1656c))
+* bump the terminal-ui group across 1 directory with 2 updates ([4b94d62](https://github.com/smorinlabs/doxa-research/commit/4b94d62217b1845e3092cd3733d281c0b9cafe9f))
+* bump the vendor-actions group across 1 directory with 2 updates ([41c387f](https://github.com/smorinlabs/doxa-research/commit/41c387fd7678fc1b324294164b0ff4c46ef2ed69))
+* bump tqdm from 4.67.3 to 4.70.0 ([ab7b19d](https://github.com/smorinlabs/doxa-research/commit/ab7b19d17a1300aaf66aed77372765f4d2d53861))
+
+
+### Refactoring
+
+* **launcher:** replace the doxa manifest with a shim, fix four stale tests ([ae0e220](https://github.com/smorinlabs/doxa-research/commit/ae0e2208edf2981c5c4ccf1bd193ced36e820d6e))
+
 ## [3.3.0](https://github.com/smorinlabs/doxa-research/compare/v3.2.1...v3.3.0) (2026-09-09)
 
 
