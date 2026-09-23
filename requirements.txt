@@ -34,7 +34,7 @@ markdown-it-py==4.2.0
     # via rich
 mdurl==0.1.2
     # via markdown-it-py
-openai==2.41.1
+openai==3.16.2
 platformdirs==4.11.7
 prompt-toolkit==3.0.53
 pydantic==2.13.5
