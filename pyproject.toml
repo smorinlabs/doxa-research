@@ -58,7 +58,7 @@ Changelog = "https://github.com/smorinlabs/doxa-research/blob/main/CHANGELOG.md"
 "Bug Tracker" = "https://github.com/smorinlabs/doxa-research/issues"
 
 [build-system]
-requires = ["uv_build>=0.11.8,<0.12"]
+requires = ["uv_build>=0.11.8,<0.13"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
