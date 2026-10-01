@@ -93,7 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 0 }}
+          fetch-depth: 0
       - name: Scan for verified secrets
         uses: trufflesecurity/trufflehog@v3.97.9
         with:
