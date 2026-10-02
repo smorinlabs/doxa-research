@@ -21,6 +21,13 @@ name: Extended Contract Tests (nightly)
       reviewed_head:
         description: 'Approved full PR commit hash'
         type: string
+      reconcile_existing_jobs:
+        description: 'Observe saved upstream jobs once with GET only'
+        type: boolean
+        default: false
+      existing_jobs_json:
+        description: 'JSON array of existing provider/job_id pairs'
+        type: string
       expected_extended_count:
         description: 'Fresh collected non-slow extended count for reviewed head'
         type: number
@@ -46,7 +53,9 @@ jobs:
     # Only run live-provider scheduled/manual jobs in the canonical repo.
     # Forks do not receive upstream secrets, and these tests can spend
     # provider quota.
-    if: github.repository == 'smorinlabs/doxa-research' && !inputs.migration_acceptance
+    if: >-
+      github.repository == 'smorinlabs/doxa-research' &&
+      !inputs.migration_acceptance && !inputs.reconcile_existing_jobs
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.1.0
@@ -86,7 +95,8 @@ jobs:
     name: Validate all reviewed live selections before paid calls
     if: >-
       github.repository == 'smorinlabs/doxa-research' &&
-      github.event_name == 'workflow_dispatch' && inputs.migration_acceptance
+      github.event_name == 'workflow_dispatch' && inputs.migration_acceptance &&
+      !inputs.reconcile_existing_jobs
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -200,7 +210,8 @@ jobs:
     name: Migration acceptance - ${{ matrix.scope }}
     if: >-
       github.repository == 'smorinlabs/doxa-research' &&
-      github.event_name == 'workflow_dispatch' && inputs.migration_acceptance
+      github.event_name == 'workflow_dispatch' && inputs.migration_acceptance &&
+      !inputs.reconcile_existing_jobs
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
@@ -362,3 +373,43 @@ jobs:
           name: migration-${{ github.sha }}-${{ matrix.scope }}
           path: ${{ runner.temp }}/migration-acceptance-sanitized/${{ matrix.scope }}
           if-no-files-found: warn
+
+  reconcile_existing_jobs:
+    name: Observe saved upstream jobs once (GET only)
+    if: >-
+      github.repository == 'smorinlabs/doxa-research' &&
+      github.event_name == 'workflow_dispatch' && inputs.reconcile_existing_jobs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          python-version: '3.11'
+          enable-cache: true
+      - name: Validate reviewed source, observer mode and saved IDs
+        id: observer_preflight
+        env:
+          REVIEWED_HEAD: ${{ inputs.reviewed_head }}
+          EXISTING_JOBS_JSON: ${{ inputs.existing_jobs_json }}
+          MIGRATION_ACCEPTANCE: ${{ inputs.migration_acceptance }}
+        run: >-
+          uv run --frozen python scripts/reconcile_live_jobs.py --preflight
+          --output-dir "$RUNNER_TEMP/job-observation"
+      - name: Observe each existing job once
+        env:
+          REVIEWED_HEAD: ${{ inputs.reviewed_head }}
+          EXISTING_JOBS_JSON: ${{ inputs.existing_jobs_json }}
+          MIGRATION_ACCEPTANCE: ${{ inputs.migration_acceptance }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+        run: >-
+          uv run --frozen python scripts/reconcile_live_jobs.py
+          --output-dir "$RUNNER_TEMP/job-observation"
+      - name: Retain sanitized one-shot observation
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: job-observation-${{ github.sha }}
+          path: ${{ runner.temp }}/job-observation
+          if-no-files-found: error
