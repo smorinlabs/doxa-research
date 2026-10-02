@@ -483,10 +483,24 @@ def test_perplexity_extra_body_survives_runtime_to_legacy_request_shapes() -> No
         config=runtime.to_legacy_config(),
     )
     sync_params = provider._build_request_params("prompt", None)
-    async_body = provider._build_async_request_body("prompt", None, "idem-test")
-
     assert sync_params["extra_body"]["new_vendor_flag"] is True
-    assert async_body["request"]["extra_body"]["new_vendor_flag"] is True
+
+    from doxa_research.errors import ProviderError
+
+    agent_runtime = build_provider_runtime_config(
+        provider_name="perplexity",
+        config=config,
+        mode_config={
+            "provider": "perplexity",
+            "model": "sonar-deep-research",
+            "kind": "background",
+            "perplexity": {"extra_body": {"new_vendor_flag": True}},
+        },
+        timeout_override=None,
+    )
+    agent = PerplexityProvider("offline-key", agent_runtime.to_legacy_config())
+    with pytest.raises(ProviderError, match="new_vendor_flag"):
+        agent._build_agent_request_body("prompt", None)
 
 
 def test_profile_perplexity_extra_body_survives_runtime_to_legacy_request_shapes(
@@ -525,10 +539,24 @@ def test_profile_perplexity_extra_body_survives_runtime_to_legacy_request_shapes
         config=runtime.to_legacy_config(),
     )
     sync_params = provider._build_request_params("prompt", None)
-    async_body = provider._build_async_request_body("prompt", None, "idem-test")
-
     assert sync_params["extra_body"]["profile_vendor_flag"] is True
-    assert async_body["request"]["extra_body"]["profile_vendor_flag"] is True
+
+    from doxa_research.errors import ProviderError
+
+    agent_runtime = build_provider_runtime_config(
+        provider_name="perplexity",
+        config=config,
+        mode_config={
+            "provider": "perplexity",
+            "model": "sonar-deep-research",
+            "kind": "background",
+            "perplexity": {"extra_body": {"profile_vendor_flag": True}},
+        },
+        timeout_override=None,
+    )
+    agent = PerplexityProvider("offline-key", agent_runtime.to_legacy_config())
+    with pytest.raises(ProviderError, match="profile_vendor_flag"):
+        agent._build_agent_request_body("prompt", None)
 
 
 def test_builtin_mode_provider_namespace_user_override_deep_merges() -> None:

@@ -13,6 +13,22 @@ name: Extended Contract Tests (nightly)
   schedule:
     - cron: "0 9 * * *"
   workflow_dispatch:
+    inputs:
+      migration_acceptance:
+        description: 'Run the reviewed migration full live acceptance batch once'
+        type: boolean
+        default: false
+      reviewed_head:
+        description: 'Approved full PR commit hash'
+        type: string
+      expected_extended_count:
+        description: 'Fresh collected non-slow extended count for reviewed head'
+        type: number
+        default: 20
+      expected_live_count:
+        description: 'Fresh collected non-slow live_api count for reviewed head'
+        type: number
+        default: 31
 
 permissions:
   contents: read
@@ -30,7 +46,7 @@ jobs:
     # Only run live-provider scheduled/manual jobs in the canonical repo.
     # Forks do not receive upstream secrets, and these tests can spend
     # provider quota.
-    if: github.repository == 'smorinlabs/doxa-research'
+    if: github.repository == 'smorinlabs/doxa-research' && !inputs.migration_acceptance
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.1.0
@@ -65,3 +81,284 @@ jobs:
           LIVE_API_STRICT: "1"
         run: uv run pytest -m "extended and not extended_slow" -v
         continue-on-error: true
+
+  migration_preflight:
+    name: Validate all reviewed live selections before paid calls
+    if: >-
+      github.repository == 'smorinlabs/doxa-research' &&
+      github.event_name == 'workflow_dispatch' && inputs.migration_acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          python-version: '3.11'
+          enable-cache: true
+      - name: Validate source, credentials and every exact selection
+        id: preflight
+        env:
+          REVIEWED_HEAD: ${{ inputs.reviewed_head }}
+          WORKFLOW_HEAD: ${{ github.sha }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EXPECTED_EXTENDED_COUNT: ${{ inputs.expected_extended_count }}
+          EXPECTED_LIVE_COUNT: ${{ inputs.expected_live_count }}
+        run: |
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$REVIEWED_HEAD" = "$WORKFLOW_HEAD"
+          test "$(git rev-parse HEAD)" = "$REVIEWED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test -n "$OPENAI_API_KEY"
+          test -n "$PERPLEXITY_API_KEY"
+          test -n "$GEMINI_API_KEY"
+          uv sync --frozen
+          uv run --frozen python - <<'PYCODE'
+          import json, os, re, subprocess
+          from pathlib import Path
+          import doxa_research
+          from doxa_research.providers import OpenAIProvider, PerplexityProvider, GeminiProvider
+          import inspect
+
+          root = Path.cwd().resolve()
+          assert re.fullmatch("[0-9a-f]{40}", os.environ["REVIEWED_HEAD"])
+          assert Path(doxa_research.__file__).resolve().parents[2] == root
+          for cls in (OpenAIProvider, PerplexityProvider, GeminiProvider):
+              assert Path(inspect.getsourcefile(cls)).resolve().is_relative_to(root)
+          selections = {
+              "extended": (["-m", "extended and not extended_slow"], int(os.environ["EXPECTED_EXTENDED_COUNT"])),
+              "live_api": (["-m", "live_api and not extended_slow"], int(os.environ["EXPECTED_LIVE_COUNT"])),
+              "complete_openai": (
+                  [
+                      (
+                          "tests/extended/test_openai_real_workflows.py"
+                          "::test_ext_oai_bg_async_blocking_resume_complete_lifecycle"
+                      ),
+                      "-m",
+                      "extended_slow",
+                  ],
+                  1,
+              ),
+              "complete_perplexity": (
+                  [
+                      (
+                          "tests/extended/test_perplexity_real_workflows.py"
+                          "::test_ext_pplx_bg_blocking_resume_complete_lifecycle"
+                      ),
+                      "-m",
+                      "extended_slow",
+                  ],
+                  1,
+              ),
+              "complete_gemini": (
+                  [
+                      (
+                          "tests/extended/test_gemini_dr_real_workflows.py"
+                          "::test_ext_gem_bg_blocking_resume_complete_lifecycle"
+                      ),
+                      "-m",
+                      "extended_slow",
+                  ],
+                  1,
+              ),
+          }
+          env = dict(os.environ, DOXA_EXTENDED_SLOW="1")
+          for name in ("OPENAI_API_KEY", "PERPLEXITY_API_KEY", "GEMINI_API_KEY"):
+              env.pop(name, None)
+          manifest = {}
+          for scope, (args, expected) in selections.items():
+              assert expected > 0
+              result = subprocess.run(
+                  ["uv", "run", "--frozen", "pytest", *args, "--collect-only", "-q"],
+                  text=True,
+                  capture_output=True,
+                  env=env,
+                  timeout=120,
+              )
+              assert result.returncode == 0, f"{scope} collection failed"
+              nodes = [
+                  line.strip() for line in result.stdout.splitlines() if line.startswith("tests/") and "::" in line
+              ]
+              assert len(nodes) == expected, f"{scope}: expected {expected} selected cases, found {len(nodes)}"
+              manifest[scope] = {"expected": expected, "nodes": nodes}
+          out = Path(os.environ["RUNNER_TEMP"]) / "migration-selection.json"
+          out.write_text(
+              json.dumps({"reviewed_head": os.environ["REVIEWED_HEAD"], "selections": manifest}, indent=2) + "\n"
+          )
+          print(json.dumps({scope: data["expected"] for scope, data in manifest.items()}, indent=2))
+          PYCODE
+      - name: Retain pre-paid selection manifest
+        if: steps.preflight.outcome == 'success'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: migration-${{ github.sha }}-selection
+          path: ${{ runner.temp }}/migration-selection.json
+
+  migration_acceptance:
+    needs: migration_preflight
+    name: Migration acceptance - ${{ matrix.scope }}
+    if: >-
+      github.repository == 'smorinlabs/doxa-research' &&
+      github.event_name == 'workflow_dispatch' && inputs.migration_acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        scope: [extended, live_api, complete_openai, complete_perplexity, complete_gemini]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          python-version: '3.11'
+          enable-cache: true
+      - name: Verify reviewed source and credentials before any paid calls
+        id: preflight
+        env:
+          REVIEWED_HEAD: ${{ inputs.reviewed_head }}
+          WORKFLOW_HEAD: ${{ github.sha }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TEST_SCOPE: ${{ matrix.scope }}
+          EXPECTED_EXTENDED_COUNT: ${{ inputs.expected_extended_count }}
+          EXPECTED_LIVE_COUNT: ${{ inputs.expected_live_count }}
+        run: |
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$REVIEWED_HEAD" = "$WORKFLOW_HEAD"
+          test -n "$OPENAI_API_KEY"
+          test -n "$PERPLEXITY_API_KEY"
+          test -n "$GEMINI_API_KEY"
+          uv sync --frozen
+          uv run --frozen python - <<'PY'
+          import hashlib, importlib.metadata, inspect, json, os, re, subprocess
+          from pathlib import Path
+          import doxa_research
+          from doxa_research.providers import OpenAIProvider, PerplexityProvider, GeminiProvider
+
+          head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          root = Path.cwd().resolve()
+          assert re.fullmatch("[0-9a-f]{40}", os.environ["REVIEWED_HEAD"])
+          assert head == os.environ["REVIEWED_HEAD"]
+          assert not subprocess.check_output(
+              ["git", "status", "--porcelain", "--untracked-files=no"], text=True
+          ).strip()
+          assert Path(doxa_research.__file__).resolve().parents[2] == root
+          assert int(os.environ["EXPECTED_EXTENDED_COUNT"]) > 0
+          assert int(os.environ["EXPECTED_LIVE_COUNT"]) > 0
+          sources = {}
+          for cls in (OpenAIProvider, PerplexityProvider, GeminiProvider):
+              path = Path(inspect.getsourcefile(cls)).resolve()
+              assert path.is_relative_to(root)
+              sources[cls.__name__] = {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+          out = Path(os.environ["RUNNER_TEMP"]) / "migration-acceptance" / os.environ["TEST_SCOPE"]
+          out.mkdir(parents=True, exist_ok=True)
+          receipt = {
+              "reviewed_head": os.environ["REVIEWED_HEAD"],
+              "checkout_head": head,
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "scope": os.environ["TEST_SCOPE"],
+              "imported_source": sources,
+              "sdk_versions": {
+                  name: importlib.metadata.version(name)
+                  for name in ("openai", "httpx2", "httpcore2", "google-genai", "pydantic", "pydantic-core")
+              },
+          }
+          (out / "source.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          PY
+      - name: Collect exact selection before starting paid tests
+        env:
+          TEST_SCOPE: ${{ matrix.scope }}
+          DOXA_EXTENDED_SLOW: '1'
+          EXPECTED_EXTENDED_COUNT: ${{ inputs.expected_extended_count }}
+          EXPECTED_LIVE_COUNT: ${{ inputs.expected_live_count }}
+        run: |
+          case "$TEST_SCOPE" in
+            extended) args=(-m 'extended and not extended_slow') ;;
+            live_api) args=(-m 'live_api and not extended_slow') ;;
+            complete_openai)
+              file=tests/extended/test_openai_real_workflows.py
+              args=("${file}::test_ext_oai_bg_async_blocking_resume_complete_lifecycle" -m extended_slow) ;;
+            complete_perplexity)
+              file=tests/extended/test_perplexity_real_workflows.py
+              args=("${file}::test_ext_pplx_bg_blocking_resume_complete_lifecycle" -m extended_slow) ;;
+            complete_gemini)
+              file=tests/extended/test_gemini_dr_real_workflows.py
+              args=("${file}::test_ext_gem_bg_blocking_resume_complete_lifecycle" -m extended_slow) ;;
+          esac
+          uv run --frozen pytest "${args[@]}" --collect-only -q \
+            > "$RUNNER_TEMP/migration-acceptance/$TEST_SCOPE/collected.txt"
+          uv run --frozen python - <<'PYCODE'
+          import os
+          from pathlib import Path
+
+          scope = os.environ["TEST_SCOPE"]
+          expected = (
+              int(os.environ["EXPECTED_EXTENDED_COUNT"] if scope == "extended" else os.environ["EXPECTED_LIVE_COUNT"])
+              if scope in ("extended", "live_api")
+              else 1
+          )
+          path = Path(os.environ["RUNNER_TEMP"]) / "migration-acceptance" / scope / "collected.txt"
+          nodes = [
+              line.strip() for line in path.read_text().splitlines() if line.startswith("tests/") and "::" in line
+          ]
+          assert len(nodes) == expected, f"{scope}: expected {expected} selected cases, found {len(nodes)}"
+          PYCODE
+      - name: Run the selected live segment once
+        env:
+          TEST_SCOPE: ${{ matrix.scope }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LIVE_API_STRICT: '1'
+          DOXA_EXTENDED_SLOW: '1'
+        run: |
+          case "$TEST_SCOPE" in
+            extended) args=(-m 'extended and not extended_slow') ;;
+            live_api) args=(-m 'live_api and not extended_slow') ;;
+            complete_openai)
+              file=tests/extended/test_openai_real_workflows.py
+              args=("${file}::test_ext_oai_bg_async_blocking_resume_complete_lifecycle" -m extended_slow) ;;
+            complete_perplexity)
+              file=tests/extended/test_perplexity_real_workflows.py
+              args=("${file}::test_ext_pplx_bg_blocking_resume_complete_lifecycle" -m extended_slow) ;;
+            complete_gemini)
+              file=tests/extended/test_gemini_dr_real_workflows.py
+              args=("${file}::test_ext_gem_bg_blocking_resume_complete_lifecycle" -m extended_slow) ;;
+          esac
+          out="$RUNNER_TEMP/migration-acceptance/$TEST_SCOPE"
+          set +e
+          timeout --signal=INT --kill-after=90s 32m uv run --frozen pytest "${args[@]}" -v \
+            --basetemp "$out/tmp" --junitxml "$out/junit.xml" > "$out/pytest.log" 2>&1
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$out/process-exit-code.txt"
+      - name: Require complete actual outcomes and sanitize artifacts
+        if: always() && steps.preflight.outcome == 'success'
+        env:
+          TEST_SCOPE: ${{ matrix.scope }}
+          EXPECTED_EXTENDED_COUNT: ${{ inputs.expected_extended_count }}
+          EXPECTED_LIVE_COUNT: ${{ inputs.expected_live_count }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          case "$TEST_SCOPE" in
+            extended) expected="$EXPECTED_EXTENDED_COUNT" ;;
+            live_api) expected="$EXPECTED_LIVE_COUNT" ;;
+            *) expected=1 ;;
+          esac
+          uv run --frozen python scripts/collect_live_acceptance.py \
+            --source "$RUNNER_TEMP/migration-acceptance/$TEST_SCOPE" \
+            --destination "$RUNNER_TEMP/migration-acceptance-sanitized/$TEST_SCOPE" \
+            --expected-count "$expected"
+      - name: Retain sanitized per-test outcomes and operation IDs
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: migration-${{ github.sha }}-${{ matrix.scope }}
+          path: ${{ runner.temp }}/migration-acceptance-sanitized/${{ matrix.scope }}
+          if-no-files-found: warn

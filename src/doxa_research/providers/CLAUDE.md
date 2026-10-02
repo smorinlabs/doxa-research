@@ -152,12 +152,14 @@ intentional, not consolidation drift.
 
 | Topic | Notes |
 |---|---|
-| **SDK** | OpenAI Python SDK in compatibility mode against `https://api.perplexity.ai` for sync. HTTPX2 directly for the preserved legacy async Sonar path (`/v1/async/sonar`). |
-| **DUAL-PATH ARCHITECTURE** | Sync path (`chat.completions`) AND async Sonar path (`/v1/async/sonar`, including status/result suffixes). Two error mappers: `_map_perplexity_error` (sync) + `_map_perplexity_error_async`. Sonar async is no longer supported upstream; see P43's live-acceptance blocker. |
-| **Models** | `sonar`, `sonar-pro` (immediate); `sonar-deep-research` (background). |
-| **`extra_body` namespace** | Perplexity-specific options live under `[modes.<X>.perplexity]` and forward to the SDK's `extra_body` (e.g. `web_search_options.search_context_size`). Modeled as `dict[str, Any]` in `config_schema.PerplexityConfig` — permissive to allow SDK evolution. |
+| **SDK** | OpenAI Python SDK in compatibility mode against `https://api.perplexity.ai` for sync. Raw HTTPX2 for Agent background research (`/v1/agent`). |
+| **DUAL-PATH ARCHITECTURE** | Immediate/streaming Sonar uses `chat.completions`; background uses flat Agent POST, GET and POST cancel. Creation never retries because Agent has no documented idempotency key. Two transport error mappers remain. |
+| **Models** | `sonar`, `sonar-pro` (immediate); legacy `sonar-deep-research` selects background Agent preset `high`, without forwarding that model name. Output metadata records the actual upstream model. |
+| **`extra_body` namespace** | Options live under `[modes.<X>.perplexity]`. Immediate options retain SDK passthrough. Agent maps `max_tokens`, `reasoning_effort` and search options into supported fields; incompatible legacy options fail before HTTP. Customized tools merge per tool with preset defaults. |
 | **Think-tag parser** | `_ThinkStreamParser` handles `<think>...</think>` tags split across stream chunks. Reuse if any other provider emits the same pattern. |
-| **Citations** | `response.search_results` for async; inline for sync. See `_format_async_sources_block`. |
+| **Citations** | Agent typed assistant `output_text` annotations and `search_results`; immediate citations are unchanged. Reasoning/tool/commentary output is excluded from the final answer. |
+| **Checkpoint identity** | New background jobs persist `agent:<opaque upstream id>`. Only the HTTP boundary removes the marker and URL-encodes one segment. Unmarked legacy jobs fail with an actionable diagnostic and are never re-submitted. |
+| **Cancellation** | Agent `cancelling` acknowledges a request; it does not prove termination. The CLI reports confirmation pending while recording local cancellation. HTTP400 terminal races are reconciled by GET. |
 | **Polling cadence** | 30s. |
 
 ## Gemini (`gemini.py`)

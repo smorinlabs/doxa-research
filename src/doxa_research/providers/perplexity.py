@@ -1,4 +1,4 @@
-"""Perplexity Sonar provider — synchronous immediate-path implementation.
+"""Perplexity provider — synchronous Sonar and durable Agent background research.
 
 Uses the OpenAI Python SDK in compatibility mode against
 `https://api.perplexity.ai`. Per-request Perplexity-specific options live
@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 
 import httpx2
@@ -108,14 +109,15 @@ class _ThinkStreamParser:
 _PROVIDER_NAME_PERPLEXITY = "perplexity"
 _INVALID_KEY_PHRASES = ("invalid api key", "incorrect api key", "invalid_api_key")
 
-# Provider-status → Doxa Research-status template for the async API. Caller fills in
-# `error` for the FAILED branch from payload["error_message"]. Unknown
-# statuses fall through to the helper's default permanent_error.
+# Agent status translation. Failed/incomplete details come from the nested error.
+# Unknown statuses are rejected before entering this table.
 _PERPLEXITY_STATUS_TABLE: dict[str, dict[str, Any]] = {
-    "CREATED": {"status": "queued", "progress": 0.0},
-    "IN_PROGRESS": {"status": "running", "progress": 0.5},
-    "COMPLETED": {"status": "completed", "progress": 1.0},
-    "FAILED": {"status": "permanent_error"},
+    "queued": {"status": "queued", "progress": 0.0},
+    "in_progress": {"status": "running", "progress": 0.5},
+    "completed": {"status": "completed", "progress": 1.0},
+    "failed": {"status": "permanent_error"},
+    "incomplete": {"status": "permanent_error"},
+    "cancelled": {"status": "cancelled"},
 }
 
 
@@ -247,17 +249,16 @@ def _map_perplexity_error(
 def _map_perplexity_error_async(
     exc: BaseException, model: str | None = None, verbose: bool = False
 ) -> DoxaError:
-    """Map an httpx2-raised exception or HTTP status code from `/v1/async/sonar` to a DoxaError.
+    """Map an httpx2-raised exception or HTTP status code from `/v1/agent` to a DoxaError.
 
     Counterpart to `_map_perplexity_error` for the async path: the OpenAI
-    SDK doesn't know about `/v1/async/sonar`, so the async submit/poll uses
+    SDK doesn't know about `/v1/agent`, so the async submit/poll uses
     raw httpx2 and surfaces httpx2 exceptions plus Perplexity's documented
     HTTP status codes. Translates them into the same Doxa Research error taxonomy
     (APIKeyError / APIQuotaError / APIRateLimitError / ProviderError) the
     runner already understands.
 
-    Status code mapping (per `research/perplexity-deep-research-api.v1.md` §8
-    and the live llms.txt verified at P27-T01):
+    Status code mapping (retained provider error taxonomy):
       * 401 -> APIKeyError, or a friendly invalid-key DoxaError if the
         body identifies the key as rejected (vs. simply missing).
       * 402 -> APIQuotaError (Perplexity uses 402 for credit exhaustion).
@@ -323,7 +324,7 @@ def _map_perplexity_error_async(
             hint = f" (model: {model!r})" if model else ""
             return ProviderError(
                 _PROVIDER_NAME_PERPLEXITY,
-                f"Invalid async request{hint}. Model may not support /v1/async/sonar.",
+                f"Invalid async request{hint}. Check the Agent preset and request fields.",
                 raw_error=raw,
             )
         if status == 429:
@@ -352,13 +353,10 @@ def _map_perplexity_error_async(
                 "Perplexity server error (5xx). Retry shortly.",
                 raw_error=raw,
             )
-        # A3 (P27 factor-dedup): no explicit 400 BadRequest branch — Perplexity's
-        # async API documents 422 (not 400) for invalid requests, so a 400 falls
-        # through to the generic HTTP-{status} bucket on purpose. Keeping it
-        # explicit so future maintainers don't add a redundant 400 branch.
+        # Other non-retryable request errors retain their exact HTTP status.
         return ProviderError(
             _PROVIDER_NAME_PERPLEXITY,
-            f"HTTP {status} from Perplexity async API: {body_text[:200]}",
+            f"HTTP {status} from Perplexity Agent API: {body_text[:200]}",
             raw_error=raw,
         )
 
@@ -395,26 +393,27 @@ _DIRECT_SDK_KEYS_PERPLEXITY: tuple[str, ...] = (
 
 
 class PerplexityProvider(ResearchProvider):
-    """Perplexity research implementation (synchronous Sonar)."""
+    """Synchronous Sonar compatibility and raw HTTPX2 Agent background research."""
 
     def __init__(self, api_key: str, config: dict[str, Any] | None = None):
         self.api_key = api_key
         self.config = config or {}
         self.model = self.config.get("model", "sonar")
+        self._routing_model = self.model
         self.jobs: dict[str, dict[str, Any]] = {}
 
         timeout = self.config.get("timeout", 30.0)
         self.client = AsyncOpenAI(
             api_key=api_key,
-            base_url=PERPLEXITY_BASE_URL,
+            base_url=self.config.get("base_url") or PERPLEXITY_BASE_URL,
             timeout=httpx2.Timeout(timeout, connect=5.0),
         )
-        # Raw httpx2 client for the async API (P27): /v1/async/sonar lives
+        # Raw HTTPX2 client for Agent background research: /v1/agent lives
         # outside the OpenAI SDK's surface, so the background lifecycle uses
         # this client instead of self.client. Tests patch this attribute via
         # AsyncMock; production code constructs a real AsyncClient here.
         self._async_http = httpx2.AsyncClient(
-            base_url=PERPLEXITY_BASE_URL,
+            base_url=self.config.get("base_url") or PERPLEXITY_BASE_URL,
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -450,28 +449,33 @@ class PerplexityProvider(ResearchProvider):
         Two directions, both raised BEFORE any HTTP call:
 
         1. `kind="immediate"` + DR model (e.g., `sonar-deep-research`) —
-           DR models require Perplexity's async API. P23's TS07 covers this.
+           The compatibility alias selects the Agent background API.
         2. `kind="background"` + non-DR model (e.g., `sonar-pro`) — only DR
-           models accept `/v1/async/sonar`; the upstream HTTP-422s otherwise.
+           compatibility alias selects Agent research; immediate Sonar stays separate.
            P27's TS06 covers this. Perplexity is stricter than OpenAI here:
            OpenAI lets you force-background any model, so OpenAIProvider only
            checks direction (1).
         """
         declared = self.config.get("kind")
-        model_is_background = is_background_model(self.model)
+        model_is_background = is_background_model(self._routing_model)
         if declared == "immediate" and model_is_background:
             raise ModeKindMismatchError(
                 mode_name=mode,
-                model=self.model,
+                model=self._routing_model,
                 declared_kind="immediate",
                 required_kind="background",
             )
         if declared == "background" and not model_is_background:
             raise ModeKindMismatchError(
                 mode_name=mode,
-                model=self.model,
+                model=self._routing_model,
                 declared_kind="background",
                 required_kind="immediate",
+            )
+
+        if declared == "background" and self._routing_model != "sonar-deep-research":
+            raise _agent_error(
+                "Agent background research supports the sonar-deep-research compatibility alias; choose that mode with an Agent preset"
             )
 
     def _build_messages(self, prompt: str, system_prompt: str | None) -> list[dict[str, str]]:
@@ -542,7 +546,7 @@ class PerplexityProvider(ResearchProvider):
         """Submit a research request; routes by declared `kind`.
 
         - `kind="background"` (P27, sonar-deep-research) -> `_submit_async`
-          (POST /v1/async/sonar; returns the upstream request_id as job_id).
+          (POST /v1/agent; persists an agent:-marked response ID).
         - Anything else (P23 immediate path) -> the existing one-shot
           /chat/completions submit, unchanged.
         """
@@ -573,72 +577,169 @@ class PerplexityProvider(ResearchProvider):
         params = self._build_request_params(prompt, system_prompt)
         return await self.client.chat.completions.create(**params)
 
-    def _build_async_request_body(
-        self, prompt: str, system_prompt: str | None, idempotency_key: str
-    ) -> dict[str, Any]:
-        """Build the /v1/async/sonar POST body with the request wrapper.
-
-        Wrapper shape is Perplexity-specific (NOT OpenAI's flat shape) per
-        https://docs.perplexity.ai/api-reference/async-chat-completions.
-        Forwards Perplexity request options from the `perplexity` config
-        namespace into the request part. `model` and `messages` stay owned by
-        Doxa Research so provider-namespace options cannot rewrite the structural
-        request.
-        """
-        messages: list[dict[str, str]] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        request_part: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
+    def _build_agent_request_body(self, prompt: str, system_prompt: str | None) -> dict[str, Any]:
+        """Translate supported legacy options into the flat Agent API request."""
+        if any(self.config.get(key) is not None for key in ("stop", "stop_sequences")):
+            raise _agent_error("Agent API does not support legacy stop/stop_sequences")
+        options = dict(self.config.get("perplexity") or {})
+        routing_model = options.pop("model", None)
+        if routing_model is not None and routing_model != "sonar-deep-research":
+            raise _agent_error(
+                "Agent background mode requires the sonar-deep-research compatibility alias"
+            )
+        extra = options.pop("extra_body", {})
+        if not isinstance(extra, dict):
+            raise _agent_error("Agent extra_body must be a mapping")
+        options = {**extra, **options}
+        for name in ("temperature", "top_p", "max_output_tokens", "max_tokens", "response_format"):
+            if name not in options and self.config.get(name) is not None:
+                options[name] = self.config[name]
+        direct = {
+            "preset",
+            "max_steps",
+            "max_output_tokens",
+            "temperature",
+            "top_p",
+            "response_format",
+            "tools",
+            "reasoning",
         }
-        perp_cfg = dict(self.config.get("perplexity") or {})
-        for key, value in perp_cfg.items():
-            if key in {"model", "messages"}:
-                continue
-            request_part[key] = value
-        return {"request": request_part, "idempotency_key": idempotency_key}
+        filters = {
+            "search_domain_filter",
+            "search_recency_filter",
+            "search_after_date_filter",
+            "search_before_date_filter",
+            "last_updated_after_filter",
+            "last_updated_before_filter",
+        }
+        known = (
+            direct
+            | filters
+            | {"max_tokens", "reasoning_effort", "web_search_options", "num_search_results"}
+        )
+        unsupported = set(options) - known
+        if unsupported:
+            raise _agent_error(
+                "Unsupported Agent API options: " + ", ".join(sorted(unsupported)),
+                suggestion="Use preset/max_steps/max_output_tokens or Agent tools/reasoning; legacy Sonar-only options cannot be forwarded.",
+            )
+        body: dict[str, Any] = {
+            "input": prompt,
+            "background": True,
+            "store": True,
+            "stream": False,
+            "preset": "high",
+        }
+        if system_prompt:
+            body["instructions"] = system_prompt
+        body.update({key: value for key, value in options.items() if key in direct})
+        if "max_tokens" in options:
+            if (
+                "max_output_tokens" in options
+                and options["max_tokens"] != options["max_output_tokens"]
+            ):
+                raise _agent_error("Conflicting max_tokens and max_output_tokens")
+            body["max_output_tokens"] = options["max_tokens"]
+        if "reasoning_effort" in options:
+            effort = options["reasoning_effort"]
+            reasoning = body.get("reasoning") or {}
+            if not isinstance(reasoning, dict) or (
+                "effort" in reasoning and reasoning["effort"] != effort
+            ):
+                raise _agent_error("Conflicting Agent reasoning settings")
+            body["reasoning"] = {**reasoning, "effort": effort}
+        if "response_format" in body:
+            fmt = body["response_format"]
+            if not isinstance(fmt, dict) or fmt.get("type") != "json_schema":
+                raise _agent_error(
+                    "Agent response_format supports json_schema only; legacy regex/json_object formats cannot be forwarded"
+                )
+        reasoning = body.get("reasoning")
+        if reasoning is not None and (
+            not isinstance(reasoning, dict)
+            or set(reasoning) - {"effort"}
+            or reasoning.get("effort") not in {"minimal", "low", "medium", "high", "xhigh", "max"}
+        ):
+            raise _agent_error("Agent reasoning.effort must be minimal/low/medium/high/xhigh/max")
+        if body["preset"] not in {"fast", "low", "medium", "high", "xhigh"}:
+            raise _agent_error("Unknown Agent preset")
+        for key, maximum in (("max_steps", 100), ("max_output_tokens", None)):
+            if key in body and (
+                type(body[key]) is not int
+                or body[key] < 1
+                or (maximum is not None and body[key] > maximum)
+            ):
+                raise _agent_error(
+                    f"Invalid Agent {key}; expected a positive integer"
+                    + (" at most 100" if maximum else "")
+                )
+        search = dict(options.get("web_search_options") or {})
+        if set(search) - {"search_context_size", "user_location"}:
+            raise _agent_error("Unsupported legacy web_search_options; use Agent tools")
+        if filters & options.keys():
+            search["filters"] = {key: options[key] for key in filters if key in options}
+        if "num_search_results" in options:
+            search["max_results"] = options["num_search_results"]
+        if search:
+            if "tools" in body:
+                raise _agent_error(
+                    "Configure search through tools or legacy search options, not both"
+                )
+            # Per-tool overrides merge with the preset; do not add unrelated tools.
+            body["tools"] = [{"type": "web_search", **search}]
+        return body
 
     async def _submit_async(
         self, prompt: str, mode: str, system_prompt: str | None, verbose: bool
     ) -> str:
-        """POST /v1/async/sonar; capture upstream request_id; map errors.
-
-        idempotency_key is generated ONCE here and reused across tenacity
-        retries — minting a fresh key per attempt would defeat idempotency.
-        """
-        idempotency_key = uuid4().hex
-        body = self._build_async_request_body(prompt, system_prompt, idempotency_key)
+        """Create one durable Agent request; ambiguous failures must never resubmit."""
+        body = self._build_agent_request_body(prompt, system_prompt)
         try:
-            response = await self._submit_async_with_retry(body)
-        except (httpx2.HTTPStatusError, httpx2.HTTPError, Exception) as exc:
-            raise _map_perplexity_error_async(exc, model=self.model, verbose=verbose) from exc
-
-        payload = response.json()
-        request_id = payload.get("id")
-        if not request_id:
-            raise ProviderError(
-                _PROVIDER_NAME_PERPLEXITY,
-                "Async submit response missing 'id' field",
-                raw_error=str(payload) if verbose else None,
-            )
-        self.jobs[request_id] = {
+            response = await self._submit_agent_once(body)
+            payload = response.json()
+            if not isinstance(payload, dict) or not isinstance(payload.get("id"), str):
+                raise _agent_error(
+                    "Agent creation outcome has no usable ID; no retry was made",
+                    suggestion="Inspect your Perplexity dashboard before submitting again.",
+                )
+            try:
+                _agent_response_id("agent:" + payload["id"])
+            except ProviderError as exc:
+                raise _agent_error(
+                    "Agent creation outcome has no usable ID; no retry was made",
+                    suggestion="Inspect your Perplexity dashboard before submitting again.",
+                ) from exc
+        except ProviderError:
+            raise
+        except Exception as exc:
+            mapped = _map_perplexity_error_async(exc, model=self.model, verbose=verbose)
+            if isinstance(
+                exc,
+                (
+                    httpx2.TimeoutException,
+                    httpx2.NetworkError,
+                    httpx2.RemoteProtocolError,
+                    ValueError,
+                ),
+            ) or (isinstance(exc, httpx2.HTTPStatusError) and exc.response.status_code >= 500):
+                raise _agent_error(
+                    "Agent submission outcome is unknown; no retry was made.",
+                    suggestion="Inspect your Perplexity dashboard before submitting again to avoid a duplicate paid job.",
+                    raw_error=str(exc) if verbose else None,
+                ) from exc
+            raise mapped from exc
+        job_id = "agent:" + payload["id"]
+        self.jobs[job_id] = {
             "response_data": payload,
             "background": True,
+            "validated": False,
             "created_at": datetime.now(),
         }
-        return request_id
+        return job_id
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type((httpx2.ConnectError, httpx2.TimeoutException)),
-        reraise=True,
-    )
-    async def _submit_async_with_retry(self, body: dict[str, Any]) -> httpx2.Response:
-        """Inner retryable POST. Raises raw httpx2 exceptions; outer maps."""
-        response = await self._async_http.post("/v1/async/sonar", json=body)
+    async def _submit_agent_once(self, body: dict[str, Any]) -> httpx2.Response:
+        """Raw HTTPX2 POST; the Agent API does not document idempotent creation."""
+        response = await self._async_http.post("/v1/agent", json=body)
         response.raise_for_status()
         return response
 
@@ -737,12 +838,12 @@ class PerplexityProvider(ResearchProvider):
 
         Sync (P23 immediate) jobs were already complete when submit() returned;
         report `completed` with no upstream call. Background (P27 async) jobs
-        GET /v1/async/sonar/{job_id} and translate Perplexity's status enum.
+        GET /v1/agent/{id} and translate the Agent status enum.
 
         Stale-cache fallback on transient errors mirrors OAI-BG-06/07: a poll
-        ConnectError/Timeout that finds a cached COMPLETED state should still
+        ConnectError/Timeout that finds a cached completed state should still
         report completed (the cached completion is authoritative); a transient
-        error with a cached IN_PROGRESS/CREATED state must NOT report completed.
+        error with a cached in_progress/queued state must NOT report completed.
         """
         if job_id not in self.jobs:
             return {"status": "not_found", "error": "Job not found"}
@@ -757,196 +858,227 @@ class PerplexityProvider(ResearchProvider):
         return await self._poll_async_job(job_id, job_info)
 
     async def _poll_async_job(self, job_id: str, job_info: dict[str, Any]) -> dict[str, Any]:
-        """Single poll attempt against /v1/async/sonar/{job_id} with translation.
-
-        Stale-cache fallback fires on transient errors AND on HTTPStatusError 5xx
-        (per OAI-BG-07 parity, P27 factor-dedup B1): a network or server blip
-        immediately after a previously-cached COMPLETED state must not regress
-        the runner's polling loop back to transient_error.
-        """
+        """Poll a validated Agent identity, preserving authoritative cached completion."""
         try:
-            response = await self._async_http.get(f"/v1/async/sonar/{job_id}")
+            upstream_id = _agent_response_id(job_id)
+            response = await self._async_http.get(f"/v1/agent/{quote(upstream_id, safe='')}")
             response.raise_for_status()
-        except httpx2.HTTPStatusError as exc:
-            status = exc.response.status_code
-            if status == 404:
-                return {
-                    "status": "permanent_error",
-                    "error": "Job expired (7-day TTL) or not found server-side",
-                }
-            mapped = _map_perplexity_error_async(exc, model=self.model)
-            if 500 <= status < 600 or isinstance(mapped, APIRateLimitError):
-                # B1: stale-cache fallback on retryable HTTP errors — a
-                # previously-cached COMPLETED is authoritative even when a
-                # later poll hits a server blip or ordinary rate limit.
-                cached = job_info.get("response_data") or {}
-                if cached.get("status") == "COMPLETED":
-                    return {"status": "completed", "progress": 1.0}
-                return {
-                    "status": "transient_error",
-                    "error": f"HTTP {status}",
-                    # B2: derive class name from type(exc) instead of hardcoding
-                    # the literal string, matching the convention used by the
-                    # other except branches and OpenAIProvider.check_status.
-                    "error_class": type(exc).__name__,
-                }
+            payload = _decode_agent_response(response, upstream_id)
+        except ProviderError as exc:
+            return {"status": "permanent_error", "error": str(exc)}
+        except Exception as exc:
+            if isinstance(exc, httpx2.HTTPStatusError):
+                status = exc.response.status_code
+                if status == 404:
+                    return {
+                        "status": "permanent_error",
+                        "error": "Agent response not found; check the account and stored response ID",
+                    }
+                mapped = _map_perplexity_error_async(exc, model=self.model)
+                transient = 500 <= status < 600 or isinstance(mapped, APIRateLimitError)
+            else:
+                mapped = exc
+                transient = isinstance(
+                    exc, (httpx2.TimeoutException, httpx2.NetworkError, httpx2.RemoteProtocolError)
+                )
+            if (
+                transient
+                and job_info.get("validated")
+                and (job_info.get("response_data") or {}).get("status") == "completed"
+            ):
+                return {"status": "completed", "progress": 1.0}
             return {
-                "status": "permanent_error",
+                "status": "transient_error" if transient else "permanent_error",
                 "error": str(mapped),
                 "error_class": type(mapped).__name__,
             }
-        except (httpx2.ConnectError, httpx2.TimeoutException) as exc:
-            cached = job_info.get("response_data") or {}
-            if cached.get("status") == "COMPLETED":
-                return {"status": "completed", "progress": 1.0}
-            return {
-                "status": "transient_error",
-                "error": str(exc),
-                "error_class": type(exc).__name__,
-            }
-        except Exception as exc:  # noqa: BLE001 - never silently swallow novel errors
-            # Intentional: named exception branches use bare str(exc); the
-            # catch-all prepends `({type(exc).__name__})` so users can
-            # distinguish a known exception class from an unexpected one in
-            # error logs. (P27 factor-dedup B3 — kept as intentional divergence.)
-            cached = job_info.get("response_data") or {}
-            if cached.get("status") == "COMPLETED":
-                return {"status": "completed", "progress": 1.0}
-            return {
-                "status": "transient_error",
-                "error": f"Unexpected error ({type(exc).__name__}): {exc}",
-                "error_class": type(exc).__name__,
-            }
-
-        payload = response.json()
-        status_str = payload.get("status", "")
-        # Always cache the latest payload so get_result() and the stale-cache
-        # fallback have an authoritative reference.
         job_info["response_data"] = payload
-
-        translated = _translate_provider_status(status_str, _PERPLEXITY_STATUS_TABLE)
-        if status_str == "FAILED":
-            translated["error"] = payload.get("error_message") or "Perplexity job FAILED"
+        job_info["validated"] = True
+        self.model = payload.get("model") or self._routing_model
+        translated = _translate_provider_status(payload["status"], _PERPLEXITY_STATUS_TABLE)
+        if payload["status"] in {"failed", "incomplete"}:
+            error = payload.get("error") or {}
+            translated["error"] = error.get("message") if isinstance(error, dict) else None
+            translated["error"] = translated["error"] or f"Agent response {payload['status']}"
         return translated
 
     async def reconnect(self, job_id: str) -> None:
-        """Re-attach to an existing async job after a process restart.
-
-        Called by `doxa resume <op_id>` before the runner re-enters the
-        polling loop. Repopulates self.jobs[job_id] from a fresh GET; a 404
-        means the 7-day TTL elapsed (or the id is wrong) and we surface
-        that specifically.
-        """
+        """Restore an Agent checkpoint without creating a new upstream request."""
+        upstream_id = _agent_response_id(job_id)
         try:
-            response = await self._async_http.get(f"/v1/async/sonar/{job_id}")
+            response = await self._async_http.get(f"/v1/agent/{quote(upstream_id, safe='')}")
             response.raise_for_status()
+            payload = _decode_agent_response(response, upstream_id)
+        except ProviderError:
+            raise
         except httpx2.HTTPStatusError as exc:
             if exc.response.status_code == 404:
-                raise ProviderError(
-                    _PROVIDER_NAME_PERPLEXITY,
-                    f"Job {job_id!r} not found. Async results expire 7 days after submission.",
+                raise _agent_error(
+                    "Agent response not found; check the account and stored response ID"
                 ) from exc
             raise _map_perplexity_error_async(exc, model=self.model) from exc
-        except (httpx2.ConnectError, httpx2.TimeoutException, Exception) as exc:
+        except Exception as exc:
             raise _map_perplexity_error_async(exc, model=self.model) from exc
-
-        payload = response.json()
         self.jobs[job_id] = {
             "response_data": payload,
             "background": True,
+            "validated": True,
             "created_at": datetime.now(),
         }
+        self.model = payload.get("model") or self._routing_model
 
     async def cancel(self, job_id: str) -> dict[str, Any]:
-        """Best-effort cancel — Perplexity has no upstream cancel API.
-
-        T01 verified against the live llms.txt and research §5: the only
-        documented endpoints are POST /v1/async/sonar (submit), GET
-        /v1/async/sonar (list), GET /v1/async/sonar/{id} (retrieve). No
-        DELETE, no /cancel, no CANCELLED status. We return the sentinel
-        consumed by cancel.py:126 so the runner marks the local checkpoint
-        cancelled and prints "upstream cancel not supported".
-        """
-        return {"status": "upstream_unsupported"}
+        """Request upstream cancellation; acknowledgment does not prove completion."""
+        upstream_id = _agent_response_id(job_id)
+        path = f"/v1/agent/{quote(upstream_id, safe='')}"
+        try:
+            response = await self._async_http.post(path + "/cancel")
+            response.raise_for_status()
+        except httpx2.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise _agent_error(
+                    "Agent response not found; check the account and stored response ID"
+                ) from exc
+            if exc.response.status_code == 400:
+                await self.reconnect(job_id)
+                status = self.jobs[job_id]["response_data"]["status"]
+                if status in {"completed", "cancelled"}:
+                    return {"status": status}
+                raise _agent_error(f"Cancellation rejected; Agent response is {status}") from exc
+            raise _map_perplexity_error_async(exc, model=self.model) from exc
+        except Exception as exc:
+            raise _map_perplexity_error_async(exc, model=self.model) from exc
+        try:
+            acknowledgment = response.json()
+        except ValueError as exc:
+            raise _agent_error("Malformed Agent cancellation acknowledgment") from exc
+        if (
+            not isinstance(acknowledgment, dict)
+            or acknowledgment.get("response_id") != upstream_id
+            or acknowledgment.get("status") != "cancelling"
+        ):
+            raise _agent_error(
+                "Unconfirmed Agent cancellation acknowledgment; poll the stored response ID"
+            )
+        return {"status": "cancelling"}
 
     async def get_result(self, job_id: str, verbose: bool = False) -> str:
-        """Final answer text for a completed job. Routes by job_info['background'].
-
-        Sync (P23 immediate) jobs delegate to _render_answer_with_sources which
-        operates on the OpenAI-SDK response object. Background (P27 async)
-        jobs use the dict-shaped payload cached by check_status, fetching
-        fresh if the cached state isn't COMPLETED yet.
-        """
+        """Render only typed assistant output from a completed Agent response."""
         if job_id not in self.jobs:
-            raise ProviderError(_PROVIDER_NAME_PERPLEXITY, f"Unknown job_id: {job_id}")
+            raise _agent_error(f"Unknown job_id: {job_id}")
         job_info = self.jobs[job_id]
         if not job_info.get("background", False):
             return _render_answer_with_sources(job_info["response"], verbose=verbose)
-        return await self._get_async_result(job_id, job_info, verbose)
-
-    async def _get_async_result(self, job_id: str, job_info: dict[str, Any], verbose: bool) -> str:
-        """Compose user-facing output from a completed async-API payload.
-
-        Order: content -> truncation warning (placed near the truncation site)
-        -> ## Sources -> ## Cost. Sources and Cost are conditional; truncation
-        warning is conservative-by-design (false positives are user-ignorable).
-        """
         payload = job_info.get("response_data") or {}
-        if payload.get("status") != "COMPLETED":
-            try:
-                response = await self._async_http.get(f"/v1/async/sonar/{job_id}")
-                response.raise_for_status()
-            except (httpx2.HTTPStatusError, httpx2.HTTPError, Exception) as exc:
-                raise _map_perplexity_error_async(exc, model=self.model, verbose=verbose) from exc
-            payload = response.json()
-            job_info["response_data"] = payload
-
-        response_part = payload.get("response") or {}
-        return _format_async_response(response_part)
+        if not job_info.get("validated") or payload.get("status") != "completed":
+            await self.reconnect(job_id)
+            payload = self.jobs[job_id]["response_data"]
+        if payload["status"] != "completed":
+            raise _agent_error(f"Agent answer is not completed: {payload['status']}")
+        return _format_agent_response(payload)
 
 
-def _format_async_response(response: dict[str, Any]) -> str:
-    """Build the user-facing string for a completed async response."""
-    choices = response.get("choices") or []
-    content = ""
-    finish_reason = ""
-    if choices and isinstance(choices[0], dict):
-        message = choices[0].get("message") or {}
-        if isinstance(message, dict):
-            content = message.get("content") or ""
-        finish_reason = choices[0].get("finish_reason") or ""
-
-    parts: list[str] = [content]
-
-    if _is_likely_truncated(content, finish_reason):
-        parts.append("\n\n> ⚠ Possible truncation: response may be incomplete.")
-
-    sources = _format_async_sources_block(response.get("search_results") or [])
-    if sources:
-        parts.append(f"\n\n{sources}")
-
-    cost = _format_async_cost_block(response.get("usage") or {})
-    if cost:
-        parts.append(cost)
-
-    return "".join(parts)
+def _agent_error(
+    message: str, suggestion: str | None = None, raw_error: str | None = None
+) -> ProviderError:
+    error = ProviderError("perplexity", message, raw_error=raw_error)
+    if suggestion is not None:
+        error.suggestion = suggestion
+    return error
 
 
-def _is_likely_truncated(content: str, finish_reason: str) -> bool:
-    """Conservative truncation heuristic: stop with no terminal punctuation.
+def _agent_response_id(job_id: str) -> str:
+    if not isinstance(job_id, str) or not job_id.startswith("agent:"):
+        raise _agent_error(
+            "Legacy Sonar checkpoint cannot reconnect or cancel through Agent API.",
+            suggestion="Async Sonar was retired. No new request was submitted; start a new research operation only if you intend a new paid job.",
+        )
+    response_id = job_id[len("agent:") :]
+    if (
+        not response_id
+        or response_id in {".", ".."}
+        or any(ord(char) < 33 or ord(char) == 127 for char in response_id)
+    ):
+        raise _agent_error("Malformed Agent checkpoint response ID")
+    return response_id
 
-    The documented Perplexity bug (research §17) is that ~25-50% of responses
-    finish with finish_reason='stop' but mid-sentence. We treat the absence
-    of terminal punctuation at the rstripped tail as the signal. Conservative
-    (false-positives tolerated) per Open Question resolution at P27 kickoff.
-    """
-    if finish_reason != "stop":
-        return False
-    stripped = content.rstrip()
-    if not stripped:
-        return False
-    last_char = stripped[-1]
-    return last_char not in ".!?\")]>}*`'"
+
+def _decode_agent_response(
+    response: httpx2.Response, expected_id: str | None = None
+) -> dict[str, Any]:
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise _agent_error(
+            "Malformed Agent JSON response; no new submission was attempted"
+        ) from exc
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("id"), str)
+        or not payload["id"]
+        or payload.get("status") not in _PERPLEXITY_STATUS_TABLE
+        or not isinstance(payload.get("output"), list)
+    ):
+        raise _agent_error(
+            "Malformed or unknown Agent response; inspect the upstream response before submitting again"
+        )
+    if expected_id is not None and payload["id"] != expected_id:
+        raise _agent_error("Agent response ID does not match the checkpoint")
+    _agent_response_id("agent:" + payload["id"])
+    if not isinstance(payload.get("model"), str) or not payload["model"]:
+        raise _agent_error("Agent response is missing the selected model")
+    if payload["status"] == "completed":
+        _format_agent_response(payload)
+    return payload
+
+
+def _format_agent_response(payload: dict[str, Any]) -> str:
+    text: list[str] = []
+    sources: list[dict[str, Any]] = []
+    for item in payload["output"]:
+        if not isinstance(item, dict):
+            raise _agent_error("Malformed Agent output item")
+        if item.get("type") == "message" and item.get("role") == "assistant":
+            if (
+                item.get("status") != "completed"
+                or not isinstance(item.get("id"), str)
+                or not item["id"]
+            ):
+                raise _agent_error("Agent assistant message is incomplete or malformed")
+            if item.get("phase") == "commentary":
+                continue
+            # Earlier assistant messages may be commentary; render the final one.
+            text = []
+            if not isinstance(item.get("content"), list):
+                raise _agent_error("Malformed Agent assistant content")
+            for content in item["content"]:
+                if (
+                    not isinstance(content, dict)
+                    or content.get("type") != "output_text"
+                    or not isinstance(content.get("text"), str)
+                ):
+                    raise _agent_error("Unsupported Agent assistant content type")
+                text.append(content["text"])
+                for citation in content.get("annotations") or []:
+                    if isinstance(citation, dict) and citation.get("type") == "url_citation":
+                        sources.append(citation)
+        elif item.get("type") == "search_results":
+            if not isinstance(item.get("results"), list):
+                raise _agent_error("Malformed Agent search results")
+            sources.extend(item["results"])
+    answer = "\n\n".join(text).strip()
+    if not answer:
+        raise _agent_error(
+            "Completed Agent response has no assistant answer",
+            suggestion="Inspect the stored response ID; no new request was submitted.",
+        )
+    source_block = _format_async_sources_block(sources)
+    if source_block:
+        answer += "\n\n" + source_block
+    usage = payload.get("usage") or {}
+    if isinstance(usage, dict):
+        answer += _format_async_cost_block(usage)
+    return answer
 
 
 def _format_async_sources_block(search_results: list[Any]) -> str:

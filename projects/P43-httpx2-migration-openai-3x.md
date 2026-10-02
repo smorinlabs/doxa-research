@@ -19,9 +19,10 @@
   `doxa_test` carries a separate PEP 723 dependency manifest, aligned with
   the project's OpenAI 3.19.2 and HTTPX2 transport versions.
 
-**Status:** `[~]` Implementation prepared for PR #172. Offline validation and hosted
-checks are required before delivery. Extended live acceptance (TS03) and
-three-provider live smoke tests (TS04) remain pending.
+**Status:** `[~]` PR #172 merged on 2026-10-02 with offline validation and
+hosted checks passing. The owner deferred P43-TS03/P43-TS04 live acceptance
+to the separately authorized [P44 Agent migration](P44-perplexity-agent-api.md).
+Those tasks remain unchecked until their actual live evidence passes.
 
 **Goal**: Migrate every first-party HTTP client from `httpx` to `httpx2`, then
 upgrade the OpenAI SDK from 2.37.0 to 3.x.
@@ -183,7 +184,6 @@ produce non-vacuous evidence. Offline validation does not complete those gates.
 As verified on 2026-10-02, Perplexity's [official Sonar migration guidance](https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview)
 says Sonar support ended on 2026-09-27 and async Sonar requests are no longer
 supported. The existing raw `/v1/async/sonar` client therefore cannot satisfy
-TS04's Perplexity smoke under the documented current API contract. Migrating
-Perplexity to the Agent API background flow requires a separate scope decision;
-this transport repair preserves the existing provider behavior and leaves TS04
-unchecked.
+TS04's Perplexity smoke under the documented current API contract. The owner authorized the separate P44 Agent migration and its live acceptance.
+P43 preserves the historical transport scope; TS03/TS04 remain unchecked until
+the P44 acceptance batch provides the full required evidence.
