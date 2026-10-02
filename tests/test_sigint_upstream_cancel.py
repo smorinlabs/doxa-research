@@ -286,3 +286,30 @@ def test_hung_cancel_unwinds_within_5s_envelope() -> None:
     # 5s envelope + small overhead. If wait_for were missing, this would be ~60s.
     assert elapsed < 6.5, f"helper hung past the 5s envelope: {elapsed:.2f}s"
     assert p.cancel_calls == ["job-1"]
+
+
+@pytest.mark.parametrize(
+    "result,expected",
+    [
+        ({"status": "cancelling"}, "confirmation is pending"),
+        ({"status": "completed"}, "Already completed upstream"),
+        ({"status": "already_terminal", "previous": "completed"}, "Already completed upstream"),
+        ({"status": "cancelled", "best_effort": True}, "Cancellation outcome unconfirmed"),
+        ({"status": "unknown"}, "Cancellation outcome unconfirmed"),
+    ],
+)
+def test_interrupt_cancel_reports_pending_terminal_and_uncertain_outcomes(result, expected):
+    class Provider(_StubProvider):
+        async def cancel(self, job_id):
+            self.cancel_calls.append(job_id)
+            return result
+
+    provider = Provider()
+    ctx, output = _make_ctx()
+    jobs = _make_jobs(("perplexity", provider, "agent:saved-id"))
+    doxa_signals._interrupt_event.set()
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(_maybe_cancel_upstream_and_raise(jobs, set(), set(), ctx, ctx.config))
+    assert provider.cancel_calls == ["agent:saved-id"]
+    assert expected in output.getvalue()
+    assert "Cancelled upstream" not in output.getvalue()

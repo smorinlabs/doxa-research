@@ -748,17 +748,31 @@ async def _maybe_cancel_upstream_and_raise(
                     if isinstance(result, BaseException):
                         # Swallow NotImplementedError / network failures; best-effort.
                         continue
-                    if isinstance(result, dict) and result.get("status") == "upstream_unsupported":
-                        # P27: Perplexity has no upstream cancel API, so cancel()
-                        # returns this sentinel instead of raising. Mirror
-                        # cancel.py:126's user-facing wording so the polling-loop
-                        # path doesn't misleadingly claim a successful cancel.
+                    status = result.get("status") if isinstance(result, dict) else None
+                    if status == "upstream_unsupported":
                         ctx.console.print(
                             f"[yellow]⚠ {name}: upstream cancel not supported; "
                             f"local checkpoint marked cancelled[/yellow]"
                         )
-                        continue
-                    ctx.console.print(f"[yellow]Cancelled upstream:[/yellow] {name}")
+                    elif isinstance(result, dict) and result.get("best_effort"):
+                        ctx.console.print(
+                            f"[yellow]Cancellation outcome unconfirmed:[/yellow] {name}"
+                        )
+                    elif status == "cancelling":
+                        ctx.console.print(
+                            f"[yellow]Cancellation requested upstream:[/yellow] {name}; confirmation is pending"
+                        )
+                    elif status == "completed" or (
+                        status == "already_terminal" and result.get("previous") == "completed"
+                    ):
+                        ctx.console.print(f"[yellow]Already completed upstream:[/yellow] {name}")
+                    elif status == "cancelled":
+                        ctx.console.print(f"[yellow]Cancelled upstream:[/yellow] {name}")
+                    else:
+                        ctx.console.print(
+                            f"[yellow]Cancellation outcome unconfirmed:[/yellow] {name}"
+                        )
+
             except TimeoutError:
                 pass  # 5s envelope exceeded; exit anyway
     elif not ctx.as_json:

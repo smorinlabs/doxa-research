@@ -131,10 +131,20 @@ def collect(source: Path, destination: Path, expected_count: int) -> dict:
             for line in selection_path.read_text().splitlines()
             if line.startswith("tests/") and "::" in line
         ]
-    result_names = [row["name"] for row in results]
-    selected_names = [node.rsplit("::", 1)[-1] for node in selected]
-    selection_matches = len(selected) == expected_count and sorted(result_names) == sorted(
-        selected_names
+    selected_identities = []
+    for node in selected:
+        address, bracket, parameters = node.partition("[")
+        parts = address.split("::")
+        module = parts[0].removesuffix(".py").replace("/", ".")
+        classname = ".".join([module, *parts[1:-1]])
+        name = parts[-1] + (bracket + parameters if bracket else "")
+        selected_identities.append((classname, name))
+    result_identities = [(row["class"], row["name"]) for row in results]
+    selection_matches = (
+        len(selected) == expected_count
+        and len(set(selected_identities)) == len(selected_identities)
+        and len(set(result_identities)) == len(result_identities)
+        and set(result_identities) == set(selected_identities)
     )
     outcome = {
         "selection_matches": selection_matches,

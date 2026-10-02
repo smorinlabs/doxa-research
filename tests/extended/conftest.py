@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -147,10 +149,62 @@ def cleanup_saved_provider_jobs(env: dict[str, str], state_root: Path, provider:
         if checkpoint.get("status") == "completed":
             continue
         try:
-            result, _ = run_doxa(["cancel", checkpoint["id"], "--json"], env, timeout=45)
-            record["returncode"] = result.returncode
-            record["result"] = payload(result)
-            record["cleanup_status"] = "best_effort_cli_returned"
+            from doxa_research.config import ConfigManager
+            from doxa_research.providers import create_provider
+
+            with patch.dict(os.environ, env, clear=True):
+                config = ConfigManager()
+                config.load_all_layers({})
+                mode = checkpoint.get("mode") or (
+                    "perplexity_deep_research"
+                    if provider == "perplexity"
+                    else "gemini_quick_research"
+                )
+                instance = create_provider(
+                    provider, config, mode_config=config.get_mode_config(mode)
+                )
+
+                async def cancel_and_close(
+                    instance: Any, job_id: str, record: dict[str, Any]
+                ) -> dict[str, Any]:
+                    try:
+                        return await asyncio.wait_for(instance.cancel(job_id), timeout=30)
+                    finally:
+                        record["close_errors"] = []
+                        client = getattr(instance, "client", None)
+                        seen: set[int] = set()
+                        for resource in (
+                            getattr(instance, "_async_http", None),
+                            getattr(client, "aio", None),
+                            client,
+                        ):
+                            if resource is None or id(resource) in seen:
+                                continue
+                            seen.add(id(resource))
+                            close = getattr(resource, "aclose", None) or getattr(
+                                resource, "close", None
+                            )
+                            if close is None:
+                                continue
+                            try:
+                                closed = close()
+                                if inspect.isawaitable(closed):
+                                    await asyncio.wait_for(closed, timeout=5)
+                            except Exception as exc:
+                                record["close_errors"].append(type(exc).__name__)
+
+                result = asyncio.run(cancel_and_close(instance, job_id, record))
+            record["result"] = result
+            status = result.get("status")
+            record["cleanup_status"] = (
+                "unknown"
+                if result.get("best_effort")
+                else "pending"
+                if status == "cancelling"
+                else "confirmed_terminal"
+                if status in {"cancelled", "completed"}
+                else "unknown"
+            )
         except Exception as exc:
             record["cleanup_status"] = "unknown"
             record["error_class"] = type(exc).__name__
