@@ -13,8 +13,8 @@ import asyncio
 import os
 import sys
 
-import httpx
-from openai import AsyncOpenAI
+import httpx2
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 from rich.console import Console
 from tenacity import (
     retry,
@@ -890,25 +890,27 @@ class InteractiveSession:
         @retry(
             stop=stop_after_attempt(retry_attempts),
             wait=wait_exponential(multiplier=retry_delay, min=retry_delay, max=retry_delay * 4),
-            retry=retry_if_exception_type((httpx.TimeoutException, httpx.ConnectError)),
+            retry=retry_if_exception_type((APITimeoutError, APIConnectionError)),
             before_sleep=lambda retry_state: self._log_retry_attempt(retry_state),
         )
         async def make_clarification_request():
-            client = AsyncOpenAI(api_key=openai_key, timeout=httpx.Timeout(30.0, connect=5.0))
-
             messages = []
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": query})
 
-            response = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-
-            return response.choices[0].message.content
+            # Tenacity owns the configured retry count. The SDK translates
+            # transport failures into APIConnectionError/APITimeoutError.
+            async with AsyncOpenAI(
+                api_key=openai_key, timeout=httpx2.Timeout(30.0, connect=5.0), max_retries=0
+            ) as client:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                return response.choices[0].message.content
 
         try:
             clarification_text = await make_clarification_request()

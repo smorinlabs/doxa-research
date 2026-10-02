@@ -72,7 +72,8 @@ Each provider needs a `_is_retryable_<provider>_exception(exc)` predicate.
 ## Error mapping
 
 `_map_<provider>_error(exc, model, verbose=False) -> ThothError`. Covers
-401/403/404/429/400/5xx + httpx network errors. Each branch returns a
+401/403/404/429/400/5xx and HTTPX2 network errors for first-party clients.
+Gemini retains HTTPX network errors at the Google SDK boundary. Each branch returns a
 ThothError subclass with an actionable message. Mirror the 12-branch
 shape of `_map_openai_error` (in `openai.py`).
 
@@ -151,8 +152,8 @@ intentional, not consolidation drift.
 
 | Topic | Notes |
 |---|---|
-| **SDK** | OpenAI Python SDK in compatibility mode against `https://api.perplexity.ai` for sync. httpx directly for async DR jobs (`/async/chat/completions`). |
-| **DUAL-PATH ARCHITECTURE** | Sync path (`chat.completions`) AND async path (`async/chat/completions`). Two error mappers: `_map_perplexity_error` (sync) + `_map_perplexity_error_async`. |
+| **SDK** | OpenAI Python SDK in compatibility mode against `https://api.perplexity.ai` for sync. HTTPX2 directly for the preserved legacy async Sonar path (`/v1/async/sonar`). |
+| **DUAL-PATH ARCHITECTURE** | Sync path (`chat.completions`) AND async Sonar path (`/v1/async/sonar`, including status/result suffixes). Two error mappers: `_map_perplexity_error` (sync) + `_map_perplexity_error_async`. Sonar async is no longer supported upstream; see P43's live-acceptance blocker. |
 | **Models** | `sonar`, `sonar-pro` (immediate); `sonar-deep-research` (background). |
 | **`extra_body` namespace** | Perplexity-specific options live under `[modes.<X>.perplexity]` and forward to the SDK's `extra_body` (e.g. `web_search_options.search_context_size`). Modeled as `dict[str, Any]` in `config_schema.PerplexityConfig` — permissive to allow SDK evolution. |
 | **Think-tag parser** | `_ThinkStreamParser` handles `<think>...</think>` tags split across stream chunks. Reuse if any other provider emits the same pattern. |
@@ -195,7 +196,7 @@ GeminiNextGenAPIClientError  <-  Exception   (NOT inherited from google.genai.er
 
 **Important**:
 - `exc.status_code` is the int. `exc.code` is ALWAYS `None` for these.
-- Constructor is `(message: str, *, response: httpx.Response, body: object | None)`. NOT `(status_code=..., message=...)`.
+- Constructor is `(message: str, *, response: httpx.Response, body: object | None)`. NOT `(status_code=..., message=...)`. This response belongs to google-genai's retained HTTPX transport.
 - The hierarchy does NOT inherit from `google.genai.errors.APIError`. Catch
   via the `_is_interactions_error(exc)` predicate in `gemini.py`, NOT
   `isinstance(exc, genai_errors.APIError)`.
@@ -251,3 +252,5 @@ job IDs.
 Synthetic provider for tests. No special conventions. Useful for
 exercising the polling loop / checkpoint state machine without API
 spend.
+
+First-party OpenAI, Perplexity and Gemini redirect clients use HTTPX2. Gemini keeps HTTPX exception matching because google-genai owns that older transport. Perplexity async research continues to use the raw HTTPX2 client, not a Perplexity SDK.

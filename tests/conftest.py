@@ -5,9 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
+import httpcore2
 import pytest
 import vcr
+from vcr.patch import CassettePatcherBuilder
+from vcr.stubs.httpcore_stubs import vcr_handle_async_request
 
 from doxa_research.config import ConfigManager
 from doxa_research.models import OperationStatus
@@ -15,6 +19,24 @@ from doxa_research.paths import user_checkpoints_dir
 from tests.conftest_p16 import baseline, run_doxa  # noqa: F401
 
 CASSETTE_DIR = Path(__file__).resolve().parent.parent / "doxa_test_cassettes"
+
+# VCRPy 8 patches httpcore, while HTTPX2 uses the separate httpcore2 module.
+# Extend the cassette's patch set so replay still reaches the real SDK's
+# transport boundary. Keep the existing httpcore patch for google-genai.
+_vcr_httpcore_patches = CassettePatcherBuilder._httpcore
+_httpcore2_async_request = httpcore2.AsyncConnectionPool.handle_async_request
+
+
+def _httpcore_with_httpx2(cassette_patcher: Any) -> Any:
+    yield from _vcr_httpcore_patches(cassette_patcher)
+    yield patch.object(
+        httpcore2.AsyncConnectionPool,
+        "handle_async_request",
+        vcr_handle_async_request(cassette_patcher._cassette, _httpcore2_async_request),
+    )
+
+
+CassettePatcherBuilder._httpcore = _httpcore_with_httpx2
 
 # Shared VCR instance:
 # - record_mode="none": never make real HTTP requests

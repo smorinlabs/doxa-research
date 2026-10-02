@@ -15,10 +15,13 @@
   passes `httpx.Timeout` into `AsyncOpenAI` (line 897).
 - **Related:** `src/doxa_research/providers/openai.py:244` — passes
   `httpx.Timeout(...)` directly into `AsyncOpenAI`.
-- **Related:** `doxa` (PEP 723 launcher, lines 4-15) — an independent
-  dependency manifest still pinning `openai>=1.14.0` and `httpx>=0.27.0`.
+- **Related:** `doxa` — a wrapper around the canonical frozen UV project.
+  `doxa_test` carries a separate PEP 723 dependency manifest, aligned with
+  the project's OpenAI 3.19.2 and HTTPX2 transport versions.
 
-**Status:** `[ ]` Scoped, not started.
+**Status:** `[~]` Implementation prepared for PR #172. Offline validation and hosted
+checks are required before delivery. Extended live acceptance (TS03) and
+three-provider live smoke tests (TS04) remain pending.
 
 **Goal**: Migrate every first-party HTTP client from `httpx` to `httpx2`, then
 upgrade the OpenAI SDK from 2.37.0 to 3.x.
@@ -59,45 +62,43 @@ constructs an httpx client or hands httpx types to the OpenAI SDK.**
 Test design comes first: each migration task is driven by the regression tests
 written in the task above it.
 
-- [ ] [P43-T00] Add `httpx2` to `pyproject.toml` and sync, **before** any
+- [x] [P43-T00] Add `httpx2` to `pyproject.toml` and sync, **before** any
       consumer is migrated. T02 onwards import httpx2, so declaring it only at
       the dependency-swap step would leave every intermediate commit unable to
       run. Removing `httpx` and bumping `openai` stays in T06, once nothing
       first-party imports the old transport.
-- [ ] [P43-TS00] Write the characterisation test for Gemini's retained httpx
+- [x] [P43-TS00] Write the characterisation test for Gemini's retained httpx
       exception boundary (`gemini.py:312-338`) before anything moves, so the
       one module that must keep catching google-genai's transport errors has a
       regression test proving it still does.
-- [ ] [P43-TS01] Write the httpx2 equivalence tests for the Perplexity client:
+- [x] [P43-TS01] Write the httpx2 equivalence tests for the Perplexity client:
       status mapping, timeout behaviour, and each exception type currently
       caught (`HTTPStatusError`, `TimeoutException`, `ConnectError`).
-- [ ] [P43-T01] Survey every `httpx` import and type reference across `src/`
+- [x] [P43-T01] Survey every `httpx` import and type reference across `src/`
       and `tests/`; record the httpx2 equivalent for each. Includes the
       existing Perplexity suite, which asserts on httpx types directly
       (`tests/test_provider_perplexity_async.py:407-419`).
-- [ ] [P43-T02] Migrate `providers/perplexity.py` to `httpx2`, driven by TS01.
-- [ ] [P43-TS02] Write the equivalence tests for the Gemini helper client, the
+- [x] [P43-T02] Migrate `providers/perplexity.py` to `httpx2`, driven by TS01.
+- [x] [P43-TS02] Write the equivalence tests for the Gemini helper client, the
       interactive flow's retry predicates, and the timeout object handed to
       `AsyncOpenAI` — the type swap there is the concrete collision, so it is
       tested before T04 and T05 rather than alongside them.
-- [ ] [P43-T03] Migrate the `providers/gemini.py` helper client calls.
-- [ ] [P43-T04] Migrate `interactive.py`: the import, the retry predicate, and
+- [x] [P43-T03] Migrate the `providers/gemini.py` helper client calls.
+- [x] [P43-T04] Migrate `interactive.py`: the import, the retry predicate, and
       the `httpx.Timeout` passed into `AsyncOpenAI`.
-- [ ] [P43-T05] Replace the `httpx.Timeout` passed into `AsyncOpenAI` at
+- [x] [P43-T05] Replace the `httpx.Timeout` passed into `AsyncOpenAI` at
       `providers/openai.py:244`.
-- [ ] [P43-T06] Bump `openai>=3.9.0` and swap `httpx` for `httpx2` in
-      `pyproject.toml`; re-lock, and regenerate the tracked `requirements.txt`
-      export so it does not keep advertising the old transport.
-- [ ] [P43-T08] Move the Dependabot `openai-stack` group to httpx2
-      (`.github/dependabot.yml:36-41` still patterns on `httpx`), so the group
-      keeps updating the transport in lock-step with the SDK.
-- [ ] [P43-T09] Update the provider transport guidance in
+- [x] [P43-T06] Bump `openai>=3.19.2,<4` and swap `httpx` for `httpx2` in
+      `pyproject.toml`; re-lock, and reconcile the SDK/transport closure in
+      `requirements.txt`, preserving unrelated legacy export drift.
+- [x] [P43-T08] The current all-dependencies multi-ecosystem group uses `*`
+      and already includes HTTPX2; no package-specific pattern remains.
+- [x] [P43-T09] Update the provider transport guidance in
       `src/doxa_research/providers/CLAUDE.md:150-155`, which documents the
       current raw-httpx contract for Perplexity.
-- [ ] [P43-T07] Update the `doxa` PEP 723 launcher manifest (lines 4-15), which
-      carries its own pins. The v3.2.1 release nearly shipped with a fixed
-      package and an unfixed launcher; `doxa_test` executes `./doxa`, so both
-      manifests must move together.
+- [x] [P43-T07] The `doxa` launcher now runs the canonical frozen UV project;
+      it no longer carries a PEP 723 dependency manifest. Align the separate
+      `doxa_test` runner manifest with OpenAI 3.19.2 and HTTPX2.
 - [ ] [P43-TS03] Full suite green, plus `tests/extended/` — see the runner note
       below; the default `pytest` invocation deselects them.
 - [ ] [P43-TS04] Live smoke test per provider: one background OpenAI call, one
@@ -157,3 +158,32 @@ when the goal is met.
 The `ask` subcommand requires a prompt (`cli_subcommands/ask.py:132-133`
 rejects an invocation without one before any provider is contacted), so the
 `-q` argument is required for this to exercise anything.
+
+## Current implementation evidence
+
+PR #172 initially requested OpenAI 3.16.2 and now requests 3.19.2. The current
+repair uses OpenAI 3.19.2 with HTTPX2/httpcore2 2.13.1. Perplexity retains its raw
+HTTPX2 async client. Gemini retains HTTPX solely for google-genai exception
+translation; its redirect helpers use HTTPX2. Clarification retries use SDK
+APITimeoutError/APIConnectionError, close clients, and disable the SDK retry
+layer so the configured outer retry count remains the request limit.
+
+The frozen project graph uses the supported stable pair Pydantic 2.13.5 and
+pydantic-core 2.46.5. The legacy requirements installer already pins this same
+pair; pydantic-core 2.49.0 is not compatible with stable Pydantic 2.13.5.
+
+The legacy requirements installer receives the SDK and transport closure only;
+unrelated export drift is preserved. VCRPy 8 only intercepts httpcore, so the
+test configuration extends its cassette patches to httpcore2. Read-only replay
+still rejects unrecorded requests before network access. Targeted provider and
+error tests and recorded OpenAI replay pass. TS03 extended/live acceptance and
+TS04 three-provider smoke remain uncompleted until their authorized live runs
+produce non-vacuous evidence. Offline validation does not complete those gates.
+
+As verified on 2026-10-02, Perplexity's [official Sonar migration guidance](https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview)
+says Sonar support ended on 2026-09-27 and async Sonar requests are no longer
+supported. The existing raw `/v1/async/sonar` client therefore cannot satisfy
+TS04's Perplexity smoke under the documented current API contract. Migrating
+Perplexity to the Agent API background flow requires a separate scope decision;
+this transport repair preserves the existing provider behavior and leaves TS04
+unchecked.

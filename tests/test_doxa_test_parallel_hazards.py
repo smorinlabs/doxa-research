@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
+import tomllib
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import ModuleType
@@ -75,7 +76,10 @@ def test_prepare_isolation_treats_equals_attached_output_flags_as_opt_out(flag_a
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-def test_config_api_key_method_uses_per_test_tmpdir_config_file(monkeypatch, tmp_path):
+@pytest.mark.parametrize("checkpoint_suffix", ["checkpoints", 'checkpoints "quoted" \\path'])
+def test_config_api_key_method_uses_per_test_tmpdir_config_file(
+    monkeypatch, tmp_path, checkpoint_suffix
+):
     captured = {}
 
     def fake_run_command(command, **kwargs):
@@ -84,6 +88,7 @@ def test_config_api_key_method_uses_per_test_tmpdir_config_file(monkeypatch, tmp
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(_MOD, "run_command", fake_run_command)
+    monkeypatch.setattr(_MOD, "get_checkpoint_dir", lambda home: home / "doxa" / checkpoint_suffix)
 
     case = _provider_tc(
         "CFG",
@@ -101,9 +106,64 @@ def test_config_api_key_method_uses_per_test_tmpdir_config_file(monkeypatch, tmp
         assert config_path.parent == tmpdir
         assert config_path.name == "test_cfg.toml"
         assert config_path.exists()
+        config = tomllib.loads(config_path.read_text())
+        checkpoint_dir = Path(config["paths"]["checkpoint_dir"])
+        assert checkpoint_dir == _MOD.get_checkpoint_dir(tmpdir)
+        assert checkpoint_dir.is_relative_to(tmpdir)
+        assert env["XDG_STATE_HOME"] == str(tmpdir)
         assert not (tmp_path / "test_cfg.toml").exists()
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_invalid_key_case_uses_scoped_loopback_http_response(monkeypatch, tmp_path):
+    import urllib.error
+    import urllib.request
+
+    seen = {}
+
+    def fake_run_command(command, **kwargs):
+        endpoint = kwargs["env"]["OPENAI_BASE_URL"]
+        assert endpoint.startswith("http://127.0.0.1:")
+        seen["endpoint"] = endpoint
+        request = urllib.request.Request(
+            endpoint + "/responses", data=b"{}", headers={"Authorization": "Bearer invalid-key"}
+        )
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request, timeout=2)
+        assert error.value.code == 401
+        assert b"invalid_api_key" in error.value.read()
+        return 1, "OpenAI API key is invalid", ""
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(_MOD, "run_command", fake_run_command)
+    case = next(case for case in _MOD.all_tests if case.test_id == "M8T-03")
+    assert case.local_openai_error["code"] == "invalid_api_key"
+    assert _MOD.TestRunner().run_test(case).passed
+    with pytest.raises(urllib.error.URLError):
+        urllib.request.urlopen(seen["endpoint"], timeout=0.2)
+
+
+def test_invalid_key_case_fails_without_a_request_to_local_fixture(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        _MOD, "run_command", lambda *args, **kwargs: (1, "OpenAI API key is invalid", "")
+    )
+    case = next(case for case in _MOD.all_tests if case.test_id == "M8T-03")
+    result = _MOD.TestRunner().run_test(case)
+    assert not result.passed
+    assert "received no HTTP request" in result.stderr
+
+
+def test_local_http_fixture_closes_when_child_execution_raises():
+    import urllib.error
+    import urllib.request
+
+    with pytest.raises(RuntimeError, match="child failed"):
+        with _MOD.local_openai_error_server({"code": "invalid_api_key"}) as (endpoint, _):
+            raise RuntimeError("child failed")
+    with pytest.raises(urllib.error.URLError):
+        urllib.request.urlopen(endpoint, timeout=0.2)
 
 
 def test_disjoint_o_paths_clean():

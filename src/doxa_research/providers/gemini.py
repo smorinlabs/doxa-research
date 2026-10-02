@@ -21,6 +21,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+import httpx2
 from google.genai import errors as genai_errors
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
@@ -1016,7 +1017,7 @@ def _is_dr_redirect(url: str) -> bool:
 
 
 async def _follow_dr_redirect(
-    url: str, *, timeout_s: float = 2.0, client: httpx.AsyncClient | None = None
+    url: str, *, timeout_s: float = 2.0, client: httpx2.AsyncClient | None = None
 ) -> str | None:
     """Follow a Vertex AI grounding redirect to extract the source URL.
 
@@ -1026,12 +1027,12 @@ async def _follow_dr_redirect(
     if not _is_dr_redirect(url):
         return url
     owns_client = client is None
-    client = client or httpx.AsyncClient(timeout=timeout_s, follow_redirects=False)
+    client = client or httpx2.AsyncClient(timeout=timeout_s, follow_redirects=False)
     try:
         resp = await client.head(url, follow_redirects=False)
         location = resp.headers.get("Location") or resp.headers.get("location")
         return location if location else None
-    except (httpx.RequestError, httpx.HTTPStatusError):
+    except (httpx2.RequestError, httpx2.HTTPStatusError):
         return None
     finally:
         if owns_client:
@@ -1047,10 +1048,10 @@ async def _resolve_dr_redirects(
     """
     sem = asyncio.Semaphore(concurrency)
 
-    async def _one(client: httpx.AsyncClient, u: str) -> tuple[str, str | None]:
+    async def _one(client: httpx2.AsyncClient, u: str) -> tuple[str, str | None]:
         async with sem:
             return u, await _follow_dr_redirect(u, timeout_s=timeout_s, client=client)
 
-    async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=False) as client:
+    async with httpx2.AsyncClient(timeout=timeout_s, follow_redirects=False) as client:
         results = await asyncio.gather(*(_one(client, u) for u in urls))
     return dict(results)

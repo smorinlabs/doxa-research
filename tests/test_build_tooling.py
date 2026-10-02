@@ -48,7 +48,9 @@ def test_make_workflow_targets_removed_and_just_check_is_quality() -> None:
             "uv run ruff check src/doxa_research/ --fix",
             "uv run ty check src/doxa_research/",
             "uv tool run ruff check doxa_test",
-            "uv tool run ty check doxa_test",
+            "uv run --frozen ty check --python",
+            "import sys; print(sys.executable)",
+            "doxa_test",
         ],
     }
     for target, patterns in expectations.items():

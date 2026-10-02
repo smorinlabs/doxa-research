@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-import httpx
+import httpx2
 import openai
 from openai import AsyncOpenAI
 from tenacity import (
@@ -247,11 +247,11 @@ def _map_perplexity_error(
 def _map_perplexity_error_async(
     exc: BaseException, model: str | None = None, verbose: bool = False
 ) -> DoxaError:
-    """Map an httpx-raised exception or HTTP status code from `/v1/async/sonar` to a DoxaError.
+    """Map an httpx2-raised exception or HTTP status code from `/v1/async/sonar` to a DoxaError.
 
     Counterpart to `_map_perplexity_error` for the async path: the OpenAI
     SDK doesn't know about `/v1/async/sonar`, so the async submit/poll uses
-    raw httpx and surfaces httpx exceptions plus Perplexity's documented
+    raw httpx2 and surfaces httpx2 exceptions plus Perplexity's documented
     HTTP status codes. Translates them into the same Doxa Research error taxonomy
     (APIKeyError / APIQuotaError / APIRateLimitError / ProviderError) the
     runner already understands.
@@ -267,14 +267,14 @@ def _map_perplexity_error_async(
       * 5xx -> transient ProviderError with a retry suggestion.
       * Other status -> generic ProviderError.
 
-    httpx exception mapping:
+    httpx2 exception mapping:
       * TimeoutException -> ProviderError("Request timed out...").
       * ConnectError    -> ProviderError("Network connection error...").
       * Anything else   -> generic ProviderError; never silently swallowed.
     """
     raw = str(exc) if verbose else None
 
-    if isinstance(exc, httpx.HTTPStatusError):
+    if isinstance(exc, httpx2.HTTPStatusError):
         status = exc.response.status_code
         body_text = ""
         try:
@@ -362,14 +362,14 @@ def _map_perplexity_error_async(
             raw_error=raw,
         )
 
-    if isinstance(exc, httpx.TimeoutException):
+    if isinstance(exc, httpx2.TimeoutException):
         return ProviderError(
             _PROVIDER_NAME_PERPLEXITY,
             "Request timed out. Try again, or raise --timeout.",
             raw_error=raw,
         )
 
-    if isinstance(exc, httpx.ConnectError):
+    if isinstance(exc, httpx2.ConnectError):
         return ProviderError(
             _PROVIDER_NAME_PERPLEXITY,
             "Network connection error reaching api.perplexity.ai.",
@@ -407,19 +407,19 @@ class PerplexityProvider(ResearchProvider):
         self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=PERPLEXITY_BASE_URL,
-            timeout=httpx.Timeout(timeout, connect=5.0),
+            timeout=httpx2.Timeout(timeout, connect=5.0),
         )
-        # Raw httpx client for the async API (P27): /v1/async/sonar lives
+        # Raw httpx2 client for the async API (P27): /v1/async/sonar lives
         # outside the OpenAI SDK's surface, so the background lifecycle uses
         # this client instead of self.client. Tests patch this attribute via
         # AsyncMock; production code constructs a real AsyncClient here.
-        self._async_http = httpx.AsyncClient(
+        self._async_http = httpx2.AsyncClient(
             base_url=PERPLEXITY_BASE_URL,
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
-            timeout=httpx.Timeout(timeout, connect=5.0),
+            timeout=httpx2.Timeout(timeout, connect=5.0),
         )
 
     def is_implemented(self) -> bool:
@@ -612,7 +612,7 @@ class PerplexityProvider(ResearchProvider):
         body = self._build_async_request_body(prompt, system_prompt, idempotency_key)
         try:
             response = await self._submit_async_with_retry(body)
-        except (httpx.HTTPStatusError, httpx.HTTPError, Exception) as exc:
+        except (httpx2.HTTPStatusError, httpx2.HTTPError, Exception) as exc:
             raise _map_perplexity_error_async(exc, model=self.model, verbose=verbose) from exc
 
         payload = response.json()
@@ -633,11 +633,11 @@ class PerplexityProvider(ResearchProvider):
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type((httpx.ConnectError, httpx.TimeoutException)),
+        retry=retry_if_exception_type((httpx2.ConnectError, httpx2.TimeoutException)),
         reraise=True,
     )
-    async def _submit_async_with_retry(self, body: dict[str, Any]) -> httpx.Response:
-        """Inner retryable POST. Raises raw httpx exceptions; outer maps."""
+    async def _submit_async_with_retry(self, body: dict[str, Any]) -> httpx2.Response:
+        """Inner retryable POST. Raises raw httpx2 exceptions; outer maps."""
         response = await self._async_http.post("/v1/async/sonar", json=body)
         response.raise_for_status()
         return response
@@ -767,7 +767,7 @@ class PerplexityProvider(ResearchProvider):
         try:
             response = await self._async_http.get(f"/v1/async/sonar/{job_id}")
             response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
+        except httpx2.HTTPStatusError as exc:
             status = exc.response.status_code
             if status == 404:
                 return {
@@ -795,7 +795,7 @@ class PerplexityProvider(ResearchProvider):
                 "error": str(mapped),
                 "error_class": type(mapped).__name__,
             }
-        except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        except (httpx2.ConnectError, httpx2.TimeoutException) as exc:
             cached = job_info.get("response_data") or {}
             if cached.get("status") == "COMPLETED":
                 return {"status": "completed", "progress": 1.0}
@@ -840,14 +840,14 @@ class PerplexityProvider(ResearchProvider):
         try:
             response = await self._async_http.get(f"/v1/async/sonar/{job_id}")
             response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
+        except httpx2.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 raise ProviderError(
                     _PROVIDER_NAME_PERPLEXITY,
                     f"Job {job_id!r} not found. Async results expire 7 days after submission.",
                 ) from exc
             raise _map_perplexity_error_async(exc, model=self.model) from exc
-        except (httpx.ConnectError, httpx.TimeoutException, Exception) as exc:
+        except (httpx2.ConnectError, httpx2.TimeoutException, Exception) as exc:
             raise _map_perplexity_error_async(exc, model=self.model) from exc
 
         payload = response.json()
@@ -896,7 +896,7 @@ class PerplexityProvider(ResearchProvider):
             try:
                 response = await self._async_http.get(f"/v1/async/sonar/{job_id}")
                 response.raise_for_status()
-            except (httpx.HTTPStatusError, httpx.HTTPError, Exception) as exc:
+            except (httpx2.HTTPStatusError, httpx2.HTTPError, Exception) as exc:
                 raise _map_perplexity_error_async(exc, model=self.model, verbose=verbose) from exc
             payload = response.json()
             job_info["response_data"] = payload
