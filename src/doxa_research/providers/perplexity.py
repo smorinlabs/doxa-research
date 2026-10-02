@@ -655,12 +655,17 @@ class PerplexityProvider(ResearchProvider):
                     "Agent response_format supports json_schema only; legacy regex/json_object formats cannot be forwarded"
                 )
         reasoning = body.get("reasoning")
+        # OpenAPI lists six efforts; the official fast preset also sends "none".
+        # Accept that documented value without removing schema-supported efforts.
         if reasoning is not None and (
             not isinstance(reasoning, dict)
             or set(reasoning) - {"effort"}
-            or reasoning.get("effort") not in {"minimal", "low", "medium", "high", "xhigh", "max"}
+            or reasoning.get("effort")
+            not in {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
         ):
-            raise _agent_error("Agent reasoning.effort must be minimal/low/medium/high/xhigh/max")
+            raise _agent_error(
+                "Agent reasoning.effort must be none/minimal/low/medium/high/xhigh/max"
+            )
         if body["preset"] not in {"fast", "low", "medium", "high", "xhigh"}:
             raise _agent_error("Unknown Agent preset")
         for key, maximum in (("max_steps", 100), ("max_output_tokens", None)):

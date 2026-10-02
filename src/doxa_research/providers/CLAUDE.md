@@ -162,6 +162,14 @@ intentional, not consolidation drift.
 | **Cancellation** | Agent `cancelling` acknowledges a request; it does not prove termination. The CLI reports confirmation pending while recording local cancellation. HTTP400 terminal races are reconciled by GET. |
 | **Polling cadence** | 30s. |
 
+Agent reasoning accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`
+and `max`, through native `reasoning.effort` or mapped legacy `reasoning_effort`.
+The [OpenAPI schema](https://docs.perplexity.ai/openapi.json) lists the six
+values excluding `none`; the [official fast preset examples](https://docs.perplexity.ai/docs/agent-api/presets)
+explicitly send `none`. Keep the documented union until those sources agree.
+Preset defaults remain upstream-controlled; model-specific acceptance is
+decided by the API.
+
 ## Gemini (`gemini.py`)
 
 Substantial extra detail because P28 shipped recently and the API has

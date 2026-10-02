@@ -775,3 +775,48 @@ def test_unidentified_agent_creation_never_retries_and_reports_uncertainty(body)
 
     asyncio.run(run())
     assert len(requests) == 1
+
+
+@pytest.mark.parametrize("effort", ["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+@pytest.mark.parametrize(
+    "legacy", [False, True], ids=["native-reasoning", "legacy-reasoning-effort"]
+)
+def test_agent_documented_reasoning_efforts_preserve_native_wire_value(effort, legacy):
+    requests = []
+    options = {"reasoning_effort": effort} if legacy else {"reasoning": {"effort": effort}}
+
+    def respond(request):
+        requests.append(request)
+        return httpx2.Response(200, json=_payload())
+
+    async def run():
+        async with _provider(respond, {"perplexity": {"preset": "fast", **options}}) as provider:
+            assert await provider.submit("query", "perplexity_deep_research") == "agent:opaque-id"
+
+    asyncio.run(run())
+    assert len(requests) == 1
+    body = json.loads(requests[0].content)
+    assert body["reasoning"] == {"effort": effort}
+    assert "reasoning_effort" not in body
+    assert body["preset"] == "fast"
+
+
+@pytest.mark.parametrize("effort", ["ultra", "off", "unknown"])
+@pytest.mark.parametrize(
+    "legacy", [False, True], ids=["native-reasoning", "legacy-reasoning-effort"]
+)
+def test_agent_unknown_reasoning_effort_is_rejected_before_http(effort, legacy):
+    requests = []
+    options = {"reasoning_effort": effort} if legacy else {"reasoning": {"effort": effort}}
+
+    def respond(request):
+        requests.append(request)
+        raise AssertionError("unsupported reasoning must fail before HTTP")
+
+    async def run():
+        async with _provider(respond, {"perplexity": options}) as provider:
+            with pytest.raises(ProviderError, match="reasoning.effort"):
+                await provider.submit("query", "perplexity_deep_research")
+
+    asyncio.run(run())
+    assert not requests
