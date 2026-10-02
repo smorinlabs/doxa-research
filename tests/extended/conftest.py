@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import re
@@ -10,8 +11,10 @@ import select
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -69,7 +72,7 @@ def live_cli_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
 
 
 @pytest.fixture
-def live_perplexity_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
+def live_perplexity_env(tmp_path: Path) -> Iterator[tuple[dict[str, str], Path]]:
     """Return an isolated environment for live Perplexity CLI subprocesses."""
     require_perplexity_key()
     env = os.environ.copy()
@@ -84,11 +87,21 @@ def live_perplexity_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
         }
     )
     env.setdefault("UV_CACHE_DIR", str(REPO_ROOT / ".uv-cache"))
-    return env, tmp_path
+    config_path = Path(env["XDG_CONFIG_HOME"]) / "doxa" / "doxa.config.toml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        'version = "2.0"\n'
+        "[modes.perplexity_deep_research.perplexity]\n"
+        'preset = "high"\nmax_steps = 10\nmax_output_tokens = 8192\n'
+    )
+    try:
+        yield env, tmp_path
+    finally:
+        cleanup_saved_provider_jobs(env, tmp_path, "perplexity")
 
 
 @pytest.fixture
-def live_gemini_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
+def live_gemini_env(tmp_path: Path) -> Iterator[tuple[dict[str, str], Path]]:
     """Return an isolated environment for live Gemini CLI subprocesses."""
     require_gemini_key()
     env = os.environ.copy()
@@ -103,7 +116,99 @@ def live_gemini_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
         }
     )
     env.setdefault("UV_CACHE_DIR", str(REPO_ROOT / ".uv-cache"))
-    return env, tmp_path
+    try:
+        yield env, tmp_path
+    finally:
+        cleanup_saved_provider_jobs(env, tmp_path, "gemini")
+
+
+def cleanup_saved_provider_jobs(env: dict[str, str], state_root: Path, provider: str) -> None:
+    """Cancel only saved, non-completed jobs; retain uncertainty without new creates."""
+    records: list[dict[str, Any]] = []
+    receipt_path = state_root / f"cleanup-receipt-{provider}.json"
+    for path in (state_root / "state" / "doxa" / "checkpoints").glob("research-*.json"):
+        try:
+            checkpoint = json.loads(path.read_text())
+        except (ValueError, OSError):
+            continue
+        pdata = checkpoint.get("providers", {}).get(provider, {})
+        job_id = pdata.get("job_id")
+        if not job_id:
+            continue
+        record: dict[str, Any] = {
+            "operation_id": checkpoint["id"],
+            "provider": provider,
+            "job_id": job_id,
+            "checkpoint_status_before_cleanup": checkpoint.get("status"),
+            "cleanup_status": "already_completed"
+            if checkpoint.get("status") == "completed"
+            else "attempting",
+        }
+        records.append(record)
+        receipt_path.write_text(json.dumps(records, indent=2) + "\n")
+        if checkpoint.get("status") == "completed":
+            continue
+        try:
+            from doxa_research.config import ConfigManager
+            from doxa_research.providers import create_provider
+
+            with patch.dict(os.environ, env, clear=True):
+                config = ConfigManager()
+                config.load_all_layers({})
+                mode = checkpoint.get("mode") or (
+                    "perplexity_deep_research"
+                    if provider == "perplexity"
+                    else "gemini_quick_research"
+                )
+                instance = create_provider(
+                    provider, config, mode_config=config.get_mode_config(mode)
+                )
+
+                async def cancel_and_close(
+                    instance: Any, job_id: str, record: dict[str, Any]
+                ) -> dict[str, Any]:
+                    try:
+                        return await asyncio.wait_for(instance.cancel(job_id), timeout=30)
+                    finally:
+                        record["close_errors"] = []
+                        client = getattr(instance, "client", None)
+                        seen: set[int] = set()
+                        for resource in (
+                            getattr(instance, "_async_http", None),
+                            getattr(client, "aio", None),
+                            client,
+                        ):
+                            if resource is None or id(resource) in seen:
+                                continue
+                            seen.add(id(resource))
+                            close = getattr(resource, "aclose", None) or getattr(
+                                resource, "close", None
+                            )
+                            if close is None:
+                                continue
+                            try:
+                                closed = close()
+                                if inspect.isawaitable(closed):
+                                    await asyncio.wait_for(closed, timeout=5)
+                            except Exception as exc:
+                                record["close_errors"].append(type(exc).__name__)
+
+                result = asyncio.run(cancel_and_close(instance, job_id, record))
+            record["result"] = result
+            status = result.get("status")
+            record["cleanup_status"] = (
+                "unknown"
+                if result.get("best_effort")
+                else "pending"
+                if status == "cancelling"
+                else "confirmed_terminal"
+                if status in {"cancelled", "completed"}
+                else "unknown"
+            )
+        except Exception as exc:
+            record["cleanup_status"] = "unknown"
+            record["error_class"] = type(exc).__name__
+        receipt_path.write_text(json.dumps(records, indent=2) + "\n")
 
 
 def run_doxa(

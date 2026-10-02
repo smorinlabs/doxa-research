@@ -187,7 +187,7 @@ protocols that achieve agreement among distributed nodes despite failures.
 
 ## Perplexity Results
 
-[parallel synthesis from sonar-deep-research with its own ### Sources block]
+[parallel synthesis from Agent preset high with its own ### Sources block]
 
 ---
 
@@ -230,7 +230,7 @@ You pay each provider's API directly — Doxa does not add cost or take a cut. R
 | Provider | Model | Typical cost per Deep Research run |
 |---|---|---|
 | OpenAI | `gpt-5.6-sol` | $1–$8 (varies with depth and prompt complexity) |
-| Perplexity | `sonar-deep-research` | $0.05–$0.50 |
+| Perplexity | Agent preset `high` (`sonar-deep-research` compatibility mode) | Depends on selected model, tools and usage |
 | Gemini | `deep-research-preview-04-2026` | $1–$3 (preview pricing; paid Tier 1+ required) |
 | Gemini | `deep-research-max-preview-04-2026` | $3–$7 (max comprehensiveness) |
 
@@ -434,10 +434,11 @@ doxa cancel a1b2c3d4-... --json
 ```
 
 `doxa-research cancel` calls the provider's upstream cancel endpoint where
-supported (OpenAI Responses API), then marks the local checkpoint as
-cancelled. Providers without upstream cancel (e.g., Perplexity at the
-time of writing) have the local checkpoint marked cancelled but the
-upstream job runs to completion.
+supported, then marks the local checkpoint as cancelled. Perplexity Agent
+cancellation may remain pending upstream; the CLI reports that acknowledgment
+without claiming the job has terminated. New Perplexity checkpoints store an
+`agent:` job marker. Older unmarked async Sonar IDs cannot be resumed through
+Agent and fail without submitting another job.
 
 ### Filtering modes by execution kind
 
@@ -954,3 +955,13 @@ rationale behind the network-service clause.
 
 Copyright © 2025-2026 Steve Morin. Contributions are accepted under the
 same AGPL-3.0-or-later terms.
+
+
+Perplexity's `perplexity_deep_research` and `all_deep_research` modes use the
+Agent API background preset `high`. The preset controls the upstream model and
+reasoning defaults. Explicit `[modes.<name>.perplexity]` settings can override
+`preset`, `max_steps`, `max_output_tokens`, `reasoning` and `tools`. Legacy
+`max_tokens`, `reasoning_effort` and supported search filters are translated.
+Legacy `stop`, `stream_mode` and regex output settings are rejected for
+background research. Immediate and streaming Sonar modes retain their existing
+configuration behavior. See [P44](projects/P44-perplexity-agent-api.md).

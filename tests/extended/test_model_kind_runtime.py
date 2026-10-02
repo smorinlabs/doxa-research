@@ -22,7 +22,11 @@ may continue billing after the test records the live runtime behavior.
 from __future__ import annotations
 
 import asyncio
+import inspect
+import json
 import os
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -65,7 +69,7 @@ def _runtime_check_skip_reason(spec) -> str | None:
     "spec",
     [_spec_param(spec) for spec in KNOWN_MODELS],
 )
-def test_model_kind_matches_runtime_behavior(spec) -> None:
+def test_model_kind_matches_runtime_behavior(spec, tmp_path: Path) -> None:
     """Submit a tiny ping; assert kind contract holds against the live API."""
     skip_reason = _runtime_check_skip_reason(spec)
     if skip_reason:
@@ -73,7 +77,10 @@ def test_model_kind_matches_runtime_behavior(spec) -> None:
 
     missing = _missing_keys_for(spec.provider)
     if missing:
-        pytest.skip(f"{spec.provider}: required env vars missing: {missing}")
+        message = f"{spec.provider}: required env vars missing: {missing}"
+        if os.environ.get("LIVE_API_STRICT") == "1":
+            pytest.fail(message)
+        pytest.skip(message)
 
     from doxa_research.config import ConfigManager
     from doxa_research.providers import create_provider
@@ -81,24 +88,63 @@ def test_model_kind_matches_runtime_behavior(spec) -> None:
     cm = ConfigManager()
     cm.load_all_layers({})
 
-    mode_config = {
+    mode_config: dict[str, Any] = {
         "provider": spec.provider,
         "model": spec.id,
         "kind": spec.kind,
     }
+    if spec.provider == "perplexity" and spec.kind == "background":
+        mode_config["perplexity"] = {"preset": "high", "max_steps": 10, "max_output_tokens": 8192}
     provider = create_provider(spec.provider, cm, mode_config=mode_config)
 
     async def _exercise() -> dict:
-        job_id = await provider.submit("ping", mode="_runtime_check_")
-        status = await provider.check_status(job_id)
-        if spec.kind == "background" and status.get("status") in ("running", "queued"):
-            # Best-effort cleanup: providers with upstream cancel stop the job;
-            # providers without it report their unsupported status and continue.
-            try:
-                await provider.cancel(job_id)
-            except NotImplementedError:
-                pass
-        return status
+        job_id = None
+        status = {}
+        receipt_path = tmp_path / "runtime-receipt.json"
+        receipt = {
+            "provider": spec.provider,
+            "model": spec.id,
+            "kind": spec.kind,
+            "logical_create_attempts": 1,
+            "job_id": None,
+            "submission_outcome": "unknown",
+            "cleanup": None,
+            "close_errors": [],
+        }
+        receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+        try:
+            job_id = await provider.submit("ping", mode="_runtime_check_")
+            receipt.update(job_id=job_id, submission_outcome="known_id")
+            receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+            status = await provider.check_status(job_id)
+            receipt["observed_status"] = status.get("status")
+            return status
+        finally:
+            if job_id and spec.kind == "background" and status.get("status") != "completed":
+                try:
+                    receipt["cleanup"] = await provider.cancel(job_id)
+                except Exception as exc:
+                    receipt["cleanup"] = {"status": "unknown", "error_class": type(exc).__name__}
+            seen = set()
+            client = getattr(provider, "client", None)
+            for resource in (
+                getattr(provider, "_async_http", None),
+                getattr(client, "aio", None),
+                client,
+            ):
+                if resource is None or id(resource) in seen:
+                    continue
+                seen.add(id(resource))
+                close = getattr(resource, "aclose", None) or getattr(resource, "close", None)
+                if close is None:
+                    continue
+                try:
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await asyncio.wait_for(result, timeout=10)
+                except Exception as exc:
+                    receipt["close_errors"].append(type(exc).__name__)
+            receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
 
     status = asyncio.run(_exercise())
 

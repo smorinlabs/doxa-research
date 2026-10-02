@@ -5,9 +5,9 @@ Gated by `@pytest.mark.live_api`. Default `pytest` skips this entire module
 `uv run pytest -m live_api` or `just test-live-api` after exporting
 `GEMINI_API_KEY`.
 
-Cost target: one Gemini Deep Research background job per full run
-(gemini_quick_research mode). Typical cost is in the cents range per run;
-the live-api workflow runs weekly via `.github/workflows/live-api.yml`.
+Background cases use gemini_quick_research. Each submitting case creates a
+separate job. The fixture retains saved IDs and requests best-effort cleanup,
+including after timeout; this is not a hard dollar cap.
 
 All tests are gated by the `live_gemini_env` fixture which skips automatically
 when GEMINI_API_KEY is not set.
@@ -32,7 +32,13 @@ from tests.extended.conftest import (
 
 pytestmark = [pytest.mark.live_api, pytest.mark.provider_gemini]
 
-GEMINI_BACKGROUND_STATUSES = {"queued", "running", "completed", "cancelled", "in_progress"}
+GEMINI_BACKGROUND_STATUSES = {
+    "queued",
+    "running",
+    "completed",
+    "cancelled",
+    "in_progress",
+}
 
 
 def _submit_gemini_background_json(
@@ -117,7 +123,11 @@ def test_ext_gem_bg_submit_async_persists_job_id(
 
     checkpoint = json.loads(checkpoint_path(state_root, operation_id).read_text())
     assert checkpoint["status"] in {"running", "completed", "in_progress"}
-    assert checkpoint["providers"]["gemini"]["status"] in {"running", "completed", "in_progress"}
+    assert checkpoint["providers"]["gemini"]["status"] in {
+        "running",
+        "completed",
+        "in_progress",
+    }
 
 
 def test_ext_gem_bg_cancel_synthetic_id_produces_useful_status(

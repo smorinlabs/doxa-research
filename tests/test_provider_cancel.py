@@ -80,14 +80,9 @@ def test_openai_cancel_handles_api_error(monkeypatch: pytest.MonkeyPatch) -> Non
     assert "upstream API broke" in result["error"]
 
 
-def test_perplexity_cancel_returns_upstream_unsupported() -> None:
-    """P27 implements cancel() to return the upstream_unsupported sentinel.
-
-    Perplexity has no DELETE / cancel endpoint (T01 verified), so cancel()
-    returns the dict shape consumed by cancel.py:126 instead of raising
-    NotImplementedError. The runner marks the local checkpoint cancelled
-    and renders "upstream cancel not supported".
-    """
+def test_perplexity_legacy_cancel_is_actionable_without_http() -> None:
     p = PerplexityProvider(api_key="key", config={"model": "sonar-deep-research"})
-    result = asyncio.run(p.cancel("any-job"))
-    assert result == {"status": "upstream_unsupported"}
+    from doxa_research.errors import ProviderError
+
+    with pytest.raises(ProviderError, match="Legacy Sonar"):
+        asyncio.run(p.cancel("any-legacy-job"))

@@ -1,11 +1,17 @@
+import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import httpx2
 import pytest
 
 from doxa_research.config import ConfigManager
+from doxa_research.errors import DoxaError
+from doxa_research.providers import create_provider
 from doxa_research.providers.parameter_config import build_provider_runtime_config
+from doxa_research.providers.perplexity import PerplexityProvider
 
 
 def _config(data: dict[str, Any]) -> ConfigManager:
@@ -19,6 +25,171 @@ def _loaded_config(tmp_path: Path, text: str, *, profile: str | None = None) -> 
     cli_args = {"_profile": profile} if profile else {}
     manager.load_all_layers(cli_args)
     return manager
+
+
+@pytest.mark.parametrize(
+    "lower_key,higher_key",
+    [
+        ("max_tokens", "max_output_tokens"),
+        ("max_output_tokens", "max_tokens"),
+    ],
+)
+@pytest.mark.parametrize("higher_scope", ["generic", "namespace"])
+def test_agent_token_alias_mode_override_reaches_actual_wire(
+    tmp_path: Path,
+    lower_key: str,
+    higher_key: str,
+    higher_scope: str,
+) -> None:
+    higher_table = "" if higher_scope == "generic" else "[modes.alias_test.perplexity]"
+    config = _loaded_config(
+        tmp_path,
+        f"""
+        version = "2.0"
+        [providers.perplexity]
+        {lower_key} = 4096
+        [modes.alias_test]
+        provider = "perplexity"
+        model = "sonar-deep-research"
+        kind = "background"
+        {higher_table}
+        {higher_key} = 1024
+    """,
+    )
+    requests: list[httpx2.Request] = []
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(200, json={"id": "alias-job", "status": "queued", "output": []})
+
+    async def run() -> None:
+        provider = cast(
+            PerplexityProvider,
+            create_provider(
+                "perplexity",
+                config,
+                cli_api_key="offline-key",
+                mode_config=config.get_mode_config("alias_test"),
+            ),
+        )
+        await provider._async_http.aclose()
+        provider._async_http = httpx2.AsyncClient(
+            base_url="https://api.perplexity.ai",
+            transport=httpx2.MockTransport(respond),
+        )
+        try:
+            assert await provider.submit("query", "alias_test") == "agent:alias-job"
+        finally:
+            await provider._async_http.aclose()
+            await provider.client.close()
+
+    asyncio.run(run())
+    assert len(requests) == 1
+    assert requests[0].url.path == "/v1/agent"
+    body = json.loads(requests[0].content)
+    assert body["max_output_tokens"] == 1024
+    assert "max_tokens" not in body
+
+
+@pytest.mark.parametrize(
+    "lower_key,higher_key",
+    [
+        ("max_tokens", "max_output_tokens"),
+        ("max_output_tokens", "max_tokens"),
+    ],
+)
+def test_agent_token_alias_namespace_overrides_generic_mode(
+    lower_key: str,
+    higher_key: str,
+) -> None:
+    runtime = build_provider_runtime_config(
+        provider_name="perplexity",
+        config=_config({}),
+        timeout_override=None,
+        mode_config={"kind": "background", lower_key: 4096, "perplexity": {higher_key: 1024}},
+    )
+    namespace = runtime.to_legacy_config()["perplexity"]
+    assert namespace[higher_key] == 1024
+    assert lower_key not in namespace
+    winning_group = "common_request" if higher_key == "max_output_tokens" else "provider_request"
+    losing_group = "common_request" if lower_key == "max_output_tokens" else "provider_request"
+    assert runtime.sources[f"{winning_group}.{higher_key}"] == "mode_config.perplexity"
+    assert f"{losing_group}.{lower_key}" not in runtime.sources
+
+
+def test_agent_provider_legacy_token_limit_overrides_common_default() -> None:
+    runtime = build_provider_runtime_config(
+        provider_name="perplexity",
+        timeout_override=None,
+        config=_config(
+            {
+                "providers": {
+                    "defaults": {"max_output_tokens": 4096},
+                    "perplexity": {"max_tokens": 1024},
+                }
+            }
+        ),
+        mode_config={"kind": "background"},
+    )
+    assert runtime.to_legacy_config()["perplexity"]["max_tokens"] == 1024
+    assert "max_output_tokens" not in runtime.common_request
+
+
+@pytest.mark.parametrize("scope", ["provider", "generic", "namespace"])
+def test_agent_same_layer_token_alias_conflict_fails_before_provider_creation(
+    scope: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from doxa_research.providers import PROVIDERS
+
+    created: list[object] = []
+
+    def unexpected_provider(*args: Any, **kwargs: Any) -> None:
+        created.append((args, kwargs))
+        raise AssertionError("No client or request may be created for conflicting aliases")
+
+    monkeypatch.setitem(PROVIDERS, "perplexity", unexpected_provider)
+    values = {"max_tokens": 4096, "max_output_tokens": 1024}
+    provider_values = values if scope == "provider" else {}
+    mode: dict[str, Any] = {"kind": "background", "model": "sonar-deep-research"}
+    if scope == "generic":
+        mode.update(values)
+    elif scope == "namespace":
+        mode["perplexity"] = values
+    with pytest.raises(DoxaError, match="Conflicting max_tokens and max_output_tokens"):
+        create_provider(
+            "perplexity",
+            _config({"providers": {"perplexity": provider_values}}),
+            cli_api_key="offline-key",
+            mode_config=mode,
+        )
+    assert created == []
+
+
+@pytest.mark.parametrize("provider,kind", [("perplexity", "immediate"), ("openai", "background")])
+def test_agent_alias_reconciliation_does_not_change_other_request_paths(
+    provider: str,
+    kind: str,
+) -> None:
+    runtime = build_provider_runtime_config(
+        provider_name=provider,
+        timeout_override=None,
+        config=_config({"providers": {provider: {"max_tokens": 4096}}}),
+        mode_config={"kind": kind, "max_output_tokens": 1024},
+    )
+    assert runtime.common_request["max_output_tokens"] == 1024
+    assert runtime.provider_request["max_tokens"] == 4096
+
+
+def test_agent_same_layer_equal_token_aliases_are_allowed() -> None:
+    runtime = build_provider_runtime_config(
+        provider_name="perplexity",
+        config=_config({}),
+        timeout_override=None,
+        mode_config={"kind": "background", "max_tokens": 1024, "max_output_tokens": 1024},
+    )
+    namespace = runtime.to_legacy_config()["perplexity"]
+    assert namespace["max_output_tokens"] == 1024
 
 
 def test_active_profile_provider_overlay_is_consumed_after_config_manager_merge(
@@ -483,10 +654,24 @@ def test_perplexity_extra_body_survives_runtime_to_legacy_request_shapes() -> No
         config=runtime.to_legacy_config(),
     )
     sync_params = provider._build_request_params("prompt", None)
-    async_body = provider._build_async_request_body("prompt", None, "idem-test")
-
     assert sync_params["extra_body"]["new_vendor_flag"] is True
-    assert async_body["request"]["extra_body"]["new_vendor_flag"] is True
+
+    from doxa_research.errors import ProviderError
+
+    agent_runtime = build_provider_runtime_config(
+        provider_name="perplexity",
+        config=config,
+        mode_config={
+            "provider": "perplexity",
+            "model": "sonar-deep-research",
+            "kind": "background",
+            "perplexity": {"extra_body": {"new_vendor_flag": True}},
+        },
+        timeout_override=None,
+    )
+    agent = PerplexityProvider("offline-key", agent_runtime.to_legacy_config())
+    with pytest.raises(ProviderError, match="new_vendor_flag"):
+        agent._build_agent_request_body("prompt", None)
 
 
 def test_profile_perplexity_extra_body_survives_runtime_to_legacy_request_shapes(
@@ -525,10 +710,24 @@ def test_profile_perplexity_extra_body_survives_runtime_to_legacy_request_shapes
         config=runtime.to_legacy_config(),
     )
     sync_params = provider._build_request_params("prompt", None)
-    async_body = provider._build_async_request_body("prompt", None, "idem-test")
-
     assert sync_params["extra_body"]["profile_vendor_flag"] is True
-    assert async_body["request"]["extra_body"]["profile_vendor_flag"] is True
+
+    from doxa_research.errors import ProviderError
+
+    agent_runtime = build_provider_runtime_config(
+        provider_name="perplexity",
+        config=config,
+        mode_config={
+            "provider": "perplexity",
+            "model": "sonar-deep-research",
+            "kind": "background",
+            "perplexity": {"extra_body": {"profile_vendor_flag": True}},
+        },
+        timeout_override=None,
+    )
+    agent = PerplexityProvider("offline-key", agent_runtime.to_legacy_config())
+    with pytest.raises(ProviderError, match="profile_vendor_flag"):
+        agent._build_agent_request_body("prompt", None)
 
 
 def test_builtin_mode_provider_namespace_user_override_deep_merges() -> None:

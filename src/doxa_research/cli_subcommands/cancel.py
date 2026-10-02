@@ -121,6 +121,8 @@ def cancel(
             status = provider_result.get("status", "?")
             if status == "cancelled":
                 click.echo(f"  ✓ {name}: cancelled upstream")
+            elif status == "cancelling":
+                click.echo(f"  - {name}: cancellation requested upstream; confirmation is pending")
             elif status == "completed":
                 click.echo(f"  ✓ {name}: completed before cancel landed")
             elif status == "upstream_unsupported":
