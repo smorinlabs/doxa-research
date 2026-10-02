@@ -986,7 +986,7 @@ class PerplexityProvider(ResearchProvider):
 def _agent_error(
     message: str, suggestion: str | None = None, raw_error: str | None = None
 ) -> ProviderError:
-    error = ProviderError("perplexity", message, raw_error=raw_error)
+    error = ProviderError(_PROVIDER_NAME_PERPLEXITY, message, raw_error=raw_error)
     if suggestion is not None:
         error.suggestion = suggestion
     return error
