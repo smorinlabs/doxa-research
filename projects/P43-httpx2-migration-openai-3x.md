@@ -19,12 +19,14 @@
   `doxa_test` carries a separate PEP 723 dependency manifest, aligned with
   the project's OpenAI 3.19.2 and HTTPX2 transport versions.
 
-**Status:** `[~]` PR #172 merged on 2026-10-02 with offline validation and
+**Status:** `[x]` PR #172 merged on 2026-10-02 with offline validation and
 hosted checks passing. The owner deferred P43-TS03/P43-TS04 live acceptance
 to the separately authorized [P44 Agent migration](P44-perplexity-agent-api.md).
-P43-TS04 passed in the three-provider completed lifecycle batch. P43-TS03
-remains unchecked: the initial 54-case run had one offline guard failure,
-and its later passing offline repair is recorded separately.
+Both gates passed in the fresh 54-test hosted batch on commit
+`b55ef98f6533f224b8adda94755f2898c14941a6`.
+The earlier 53/54 run remains a failed historical run.
+[PR #176](https://github.com/smorinlabs/doxa-research/pull/176) remains open;
+merging it has not been authorized.
 
 **Goal**: Migrate every first-party HTTP client from `httpx` to `httpx2`, then
 upgrade the OpenAI SDK from 2.37.0 to 3.x.
@@ -102,7 +104,7 @@ written in the task above it.
 - [x] [P43-T07] The `doxa` launcher now runs the canonical frozen UV project;
       it no longer carries a PEP 723 dependency manifest. Align the separate
       `doxa_test` runner manifest with OpenAI 3.19.2 and HTTPX2.
-- [ ] [P43-TS03] Full suite green, plus `tests/extended/` — see the runner note
+- [x] [P43-TS03] Full suite green, plus `tests/extended/` — see the runner note
       below; the default `pytest` invocation deselects them.
 - [x] [P43-TS04] Live smoke test per provider: one background OpenAI call, one
       Perplexity async call, one Gemini Deep Research call.
@@ -179,17 +181,39 @@ The legacy requirements installer receives the SDK and transport closure only;
 unrelated export drift is preserved. VCRPy 8 only intercepts httpcore, so the
 test configuration extends its cassette patches to httpcore2. Read-only replay
 still rejects unrecorded requests before network access. Targeted provider and
-error tests and recorded OpenAI replay pass. TS04's three-provider completed
-lifecycle smoke passed in [run 36979307601](https://github.com/smorinlabs/doxa-research/actions/runs/36979307601)
-on the separate migration head `4cd777f`. TS03 remains unchecked because the
-initial extended/live batch passed 53/54 cases. The failed guard was repaired
-and passed with HTTP forbidden; this supplemental offline evidence does not
-change the original hosted workflow conclusion.
+error tests and recorded OpenAI replay pass. The fresh hosted acceptance batch,
+[run 37029071053](https://github.com/smorinlabs/doxa-research/actions/runs/37029071053)
+attempt 1, passed all 54 selected tests on commit
+`b55ef98f6533f224b8adda94755f2898c14941a6`, tree
+`30484bf3db216fcaeac55d021b4c68d446c82303`: 20/20 non-slow extended tests,
+31/31 non-slow live_api tests, and one completed lifecycle test each for
+OpenAI, Perplexity and Gemini. No test failed, skipped or xfailed. This closes
+TS03 and TS04 on that tested commit. The Gemini lifecycle test verified its
+output file was nonempty and had the expected provenance in the runner;
+the sanitized artifact did not retain that file because it was outside the
+collector's temporary-directory scope.
+
+The earlier [run 36979307601](https://github.com/smorinlabs/doxa-research/actions/runs/36979307601)
+on `4cd777f` passed 53/54 tests and concluded failure. Its incorrect offline
+guard was repaired and passed separately with HTTP forbidden. The fresh
+54/54 run supersedes that failed run for acceptance; it does not change the
+earlier result into a pass.
+
+A separate [GET-only observation run 37030325743](https://github.com/smorinlabs/doxa-research/actions/runs/37030325743)
+confirmed HTTP 200 and terminal upstream states for all six saved jobs needing
+follow-up from the fresh batch: four OpenAI jobs were cancelled; one
+Perplexity job completed and one was cancelled. It issued six GET requests,
+created no jobs and cancelled no jobs. No saved job in that follow-up remains
+pending or unknown.
+
+This tracking update changes documentation only. Runtime, tests, SDK locks and
+workflows retain the bytes tested at `b55ef98f6533f224b8adda94755f2898c14941a6`.
 
 As verified on 2026-10-02, Perplexity's [official Sonar migration guidance](https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview)
 says Sonar support ended on 2026-09-27 and async Sonar requests are no longer
-supported. The existing raw `/v1/async/sonar` client therefore cannot satisfy
-TS04's Perplexity smoke under the documented current API contract. The owner authorized the separate P44 Agent migration and its live acceptance.
+supported. The retired raw `/v1/async/sonar` path could not satisfy TS04's
+Perplexity smoke under the documented current API contract. The owner
+authorized the separate P44 Agent migration and its live acceptance.
 P43 preserves the historical transport scope. The separate P44 Agent API
 migration supplied the successful Perplexity completion smoke; its PR remains
 open pending the owner's merge decision.
