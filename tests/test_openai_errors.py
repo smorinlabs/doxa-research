@@ -11,7 +11,7 @@ import logging
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import httpx
+import httpx2
 import openai
 import pytest
 
@@ -33,15 +33,15 @@ def _fake_sdk_error(
     status: int = 400,
     body: Any = None,
 ) -> openai.APIError:
-    """Construct a fake openai SDK exception with minimal httpx.Response."""
-    request = httpx.Request("POST", "https://api.openai.com/v1/responses")
+    """Construct a fake openai SDK exception with minimal httpx2.Response."""
+    request = httpx2.Request("POST", "https://api.openai.com/v1/responses")
     if exc_class is openai.APITimeoutError:
         return exc_class(request=request)
     if exc_class is openai.APIConnectionError:
         return exc_class(message=message, request=request)
     if exc_class is openai.APIError:
         return exc_class(message=message, request=request, body=body)
-    response = httpx.Response(status_code=status, request=request)
+    response = httpx2.Response(status_code=status, request=request)
     return exc_class(message=message, response=response, body=body)  # ty: ignore[missing-argument,unknown-argument]
 
 

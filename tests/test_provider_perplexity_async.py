@@ -1,14 +1,14 @@
 """P27 — Perplexity async (background deep-research) provider tests.
 
 Covers the asynchronous lifecycle on top of `/v1/async/sonar`: error
-mapping for raw httpx exceptions and Perplexity HTTP status codes,
+mapping for raw httpx2 exceptions and Perplexity HTTP status codes,
 plus future submit / check_status / get_result / reconnect / cancel
 coverage as those land. Mirrors the structure of `test_oai_background.py`
 but against the Perplexity async API instead of OpenAI Responses.
 
 Test slices:
 - P27-T04: `_map_perplexity_error_async` covers 401/402/422/429/5xx and
-  httpx.TimeoutException / ConnectError → DoxaError taxonomy.
+  httpx2.TimeoutException / ConnectError → DoxaError taxonomy.
 - P27-TS01..TS05: lifecycle coverage (submit body shape, status mapping,
   get_result extraction, reconnect, cancel) — added as those lifecycle
   methods land.
@@ -20,7 +20,7 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2
 import pytest
 
 from doxa_research.errors import (
@@ -36,11 +36,11 @@ from doxa_research.providers.perplexity import (
 )
 
 
-def _make_http_status_error(status: int, body: str = "{}") -> httpx.HTTPStatusError:
-    """Construct an httpx.HTTPStatusError as the SDK would raise from raise_for_status()."""
-    request = httpx.Request("GET", "https://api.perplexity.ai/v1/async/sonar/job-x")
-    response = httpx.Response(status_code=status, content=body.encode(), request=request)
-    return httpx.HTTPStatusError(f"HTTP {status}", request=request, response=response)
+def _make_http_status_error(status: int, body: str = "{}") -> httpx2.HTTPStatusError:
+    """Construct an httpx2.HTTPStatusError as the SDK would raise from raise_for_status()."""
+    request = httpx2.Request("GET", "https://api.perplexity.ai/v1/async/sonar/job-x")
+    response = httpx2.Response(status_code=status, content=body.encode(), request=request)
+    return httpx2.HTTPStatusError(f"HTTP {status}", request=request, response=response)
 
 
 # ---------------------------------------------------------------------------
@@ -164,16 +164,16 @@ def test_async_map_5xx_returns_transient_provider_error(status: int) -> None:
 
 
 def test_async_map_httpx_timeout_returns_provider_error() -> None:
-    """T04: httpx.TimeoutException → ProviderError with timeout language."""
-    exc = httpx.TimeoutException("request timed out")
+    """T04: httpx2.TimeoutException → ProviderError with timeout language."""
+    exc = httpx2.TimeoutException("request timed out")
     result = _map_perplexity_error_async(exc)
     assert isinstance(result, ProviderError)
     assert "timed out" in str(result).lower()
 
 
 def test_async_map_httpx_connect_error_returns_provider_error() -> None:
-    """T04: httpx.ConnectError → ProviderError with network language."""
-    exc = httpx.ConnectError("DNS resolution failed")
+    """T04: httpx2.ConnectError → ProviderError with network language."""
+    exc = httpx2.ConnectError("DNS resolution failed")
     result = _map_perplexity_error_async(exc)
     assert isinstance(result, ProviderError)
     assert "network" in str(result).lower() or "connection" in str(result).lower()
@@ -200,20 +200,20 @@ def test_async_map_verbose_includes_raw_error_text() -> None:
 # P27-TS01 — submit() POST body shape + idempotency
 # ---------------------------------------------------------------------------
 #
-# All tests below patch `provider._async_http` (the raw httpx client
+# All tests below patch `provider._async_http` (the raw httpx2 client
 # scheduled to be added in __init__ alongside the existing AsyncOpenAI
 # `provider.client`). Calls to `submit()` with kind="background" route
-# through this httpx client; calls with kind="immediate" continue to use
+# through this httpx2 client; calls with kind="immediate" continue to use
 # the existing OpenAI-SDK client and are out of scope here.
 
 
 def _async_response(
     status_code: int = 202,
     payload: dict[str, Any] | None = None,
-) -> httpx.Response:
-    """Build an httpx.Response with a JSON body and a synthetic Request."""
-    request = httpx.Request("POST", "https://api.perplexity.ai/v1/async/sonar")
-    response = httpx.Response(
+) -> httpx2.Response:
+    """Build an httpx2.Response with a JSON body and a synthetic Request."""
+    request = httpx2.Request("POST", "https://api.perplexity.ai/v1/async/sonar")
+    response = httpx2.Response(
         status_code=status_code,
         json=payload or {"id": "req-async-123", "status": "CREATED"},
         request=request,
@@ -222,10 +222,10 @@ def _async_response(
 
 
 def _make_background_provider(
-    response: httpx.Response | None = None,
+    response: httpx2.Response | None = None,
     extra_config: dict[str, Any] | None = None,
 ) -> tuple[PerplexityProvider, AsyncMock]:
-    """Provider wired with an AsyncMock httpx client; returns (provider, post_mock)."""
+    """Provider wired with an AsyncMock httpx2 client; returns (provider, post_mock)."""
     config: dict[str, Any] = {
         "model": "sonar-deep-research",
         "kind": "background",
@@ -288,10 +288,10 @@ def test_async_submit_idempotency_key_stable_across_retries() -> None:
     provider, post = _make_background_provider()
     seen_keys: list[str] = []
 
-    async def flaky_post(*args: Any, **kwargs: Any) -> httpx.Response:
+    async def flaky_post(*args: Any, **kwargs: Any) -> httpx2.Response:
         seen_keys.append(kwargs["json"]["idempotency_key"])
         if len(seen_keys) < 3:
-            raise httpx.ConnectError("transient network failure")
+            raise httpx2.ConnectError("transient network failure")
         return _async_response()
 
     post.side_effect = flaky_post
@@ -405,7 +405,7 @@ def test_async_submit_does_not_route_immediate_kind_through_async_path() -> None
 
 
 def test_async_submit_provider_init_creates_async_http_client() -> None:
-    """T03 part 2: __init__ wires self._async_http as an httpx.AsyncClient.
+    """T03 part 2: __init__ wires self._async_http as an httpx2.AsyncClient.
 
     Verified by attribute presence and base_url. Tests below patch this
     attribute, but the real construction must happen in __init__.
@@ -414,7 +414,7 @@ def test_async_submit_provider_init_creates_async_http_client() -> None:
         api_key="pplx-test", config={"model": "sonar-deep-research", "kind": "background"}
     )
     assert hasattr(provider, "_async_http"), "expected _async_http attribute in __init__"
-    assert isinstance(provider._async_http, httpx.AsyncClient)
+    assert isinstance(provider._async_http, httpx2.AsyncClient)
     assert str(provider._async_http.base_url).rstrip("/") == "https://api.perplexity.ai"
     asyncio.run(provider._async_http.aclose())
 
@@ -433,17 +433,17 @@ def test_async_submit_provider_init_creates_async_http_client() -> None:
 def _status_response(
     status: str = "IN_PROGRESS",
     extra: dict[str, Any] | None = None,
-) -> httpx.Response:
+) -> httpx2.Response:
     payload: dict[str, Any] = {"id": "req-async-123", "status": status}
     if extra:
         payload.update(extra)
-    request = httpx.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
-    return httpx.Response(status_code=200, json=payload, request=request)
+    request = httpx2.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
+    return httpx2.Response(status_code=200, json=payload, request=request)
 
 
 def _attach_get_response(
     provider: PerplexityProvider,
-    response: httpx.Response | Exception,
+    response: httpx2.Response | Exception,
 ) -> AsyncMock:
     """Replace provider._async_http with an AsyncMock whose .get yields `response`."""
     fake_client = AsyncMock()
@@ -532,9 +532,9 @@ def test_check_status_404_maps_to_permanent_error_with_ttl_hint() -> None:
     """
     provider, _ = _make_background_provider()
     _seed_background_job(provider)
-    request = httpx.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
-    response = httpx.Response(status_code=404, content=b"{}", request=request)
-    err = httpx.HTTPStatusError("404", request=request, response=response)
+    request = httpx2.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
+    response = httpx2.Response(status_code=404, content=b"{}", request=request)
+    err = httpx2.HTTPStatusError("404", request=request, response=response)
     _attach_get_response(provider, err)
     result = asyncio.run(provider.check_status("req-async-123"))
     assert result["status"] == "permanent_error"
@@ -552,9 +552,9 @@ def test_check_status_non_retryable_http_error_maps_to_permanent_error(status: i
     """P27 review: non-retryable poll HTTP errors must not burn transient retries."""
     provider, _ = _make_background_provider()
     _seed_background_job(provider)
-    request = httpx.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
-    response = httpx.Response(status_code=status, content=b"{}", request=request)
-    err = httpx.HTTPStatusError(str(status), request=request, response=response)
+    request = httpx2.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
+    response = httpx2.Response(status_code=status, content=b"{}", request=request)
+    err = httpx2.HTTPStatusError(str(status), request=request, response=response)
     _attach_get_response(provider, err)
     result = asyncio.run(provider.check_status("req-async-123"))
     assert result["status"] == "permanent_error"
@@ -571,9 +571,9 @@ def test_check_status_retryable_http_error_stays_transient(status: int) -> None:
     """P27 review: rate limits and server errors remain retryable while job is running."""
     provider, _ = _make_background_provider()
     _seed_background_job(provider, cached_status="IN_PROGRESS")
-    request = httpx.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
-    response = httpx.Response(status_code=status, content=b"{}", request=request)
-    err = httpx.HTTPStatusError(str(status), request=request, response=response)
+    request = httpx2.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
+    response = httpx2.Response(status_code=status, content=b"{}", request=request)
+    err = httpx2.HTTPStatusError(str(status), request=request, response=response)
     _attach_get_response(provider, err)
     result = asyncio.run(provider.check_status("req-async-123"))
     assert result["status"] == "transient_error"
@@ -590,7 +590,7 @@ def test_check_status_transient_error_with_stale_in_progress_cache_does_not_comp
     """
     provider, _ = _make_background_provider()
     _seed_background_job(provider, cached_status="IN_PROGRESS")
-    _attach_get_response(provider, httpx.ConnectError("network blip"))
+    _attach_get_response(provider, httpx2.ConnectError("network blip"))
     result = asyncio.run(provider.check_status("req-async-123"))
     assert result["status"] == "transient_error"
     assert result["status"] != "completed", (
@@ -607,7 +607,7 @@ def test_check_status_transient_error_with_stale_completed_cache_returns_complet
     """
     provider, _ = _make_background_provider()
     _seed_background_job(provider, cached_status="COMPLETED")
-    _attach_get_response(provider, httpx.ConnectError("network blip"))
+    _attach_get_response(provider, httpx2.ConnectError("network blip"))
     result = asyncio.run(provider.check_status("req-async-123"))
     assert result["status"] == "completed"
     assert result["progress"] == 1.0
@@ -624,9 +624,9 @@ def test_check_status_http_5xx_with_stale_completed_cache_returns_completed() ->
     """
     provider, _ = _make_background_provider()
     _seed_background_job(provider, cached_status="COMPLETED")
-    request = httpx.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
-    response = httpx.Response(status_code=503, content=b"{}", request=request)
-    err = httpx.HTTPStatusError("503", request=request, response=response)
+    request = httpx2.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
+    response = httpx2.Response(status_code=503, content=b"{}", request=request)
+    err = httpx2.HTTPStatusError("503", request=request, response=response)
     _attach_get_response(provider, err)
     result = asyncio.run(provider.check_status("req-async-123"))
     assert result["status"] == "completed"
@@ -837,8 +837,8 @@ def test_get_result_fetches_when_cached_state_is_not_completed() -> None:
         "created_at": __import__("datetime").datetime.now(),
     }
     completed_payload = _completed_payload(content="Fresh answer.")
-    request = httpx.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
-    response = httpx.Response(status_code=200, json=completed_payload, request=request)
+    request = httpx2.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
+    response = httpx2.Response(status_code=200, json=completed_payload, request=request)
     fake_client = AsyncMock()
     fake_client.get = AsyncMock(return_value=response)
     provider._async_http = fake_client  # type: ignore[attr-defined]
@@ -891,10 +891,10 @@ def test_reconnect_happy_path_repopulates_jobs() -> None:
     """TS04: GET success populates self.jobs[job_id] with background=True."""
     provider, _ = _make_background_provider()
     payload = {"id": "req-async-123", "status": "IN_PROGRESS"}
-    request = httpx.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
+    request = httpx2.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-async-123")
     fake_client = AsyncMock()
     fake_client.get = AsyncMock(
-        return_value=httpx.Response(status_code=200, json=payload, request=request)
+        return_value=httpx2.Response(status_code=200, json=payload, request=request)
     )
     provider._async_http = fake_client  # type: ignore[attr-defined]
     asyncio.run(provider.reconnect("req-async-123"))
@@ -911,9 +911,9 @@ def test_reconnect_404_raises_provider_error_with_ttl_hint() -> None:
     the user-visible error must explain that.
     """
     provider, _ = _make_background_provider()
-    request = httpx.Request("GET", "https://api.perplexity.ai/v1/async/sonar/expired")
-    response = httpx.Response(status_code=404, content=b"{}", request=request)
-    err = httpx.HTTPStatusError("404", request=request, response=response)
+    request = httpx2.Request("GET", "https://api.perplexity.ai/v1/async/sonar/expired")
+    response = httpx2.Response(status_code=404, content=b"{}", request=request)
+    err = httpx2.HTTPStatusError("404", request=request, response=response)
     fake_client = AsyncMock()
     fake_client.get = AsyncMock(side_effect=err)
     provider._async_http = fake_client  # type: ignore[attr-defined]
@@ -973,7 +973,7 @@ def test_cancel_works_for_unknown_job_id() -> None:
 # Combines T12 (Perplexity request_id round-trips through JSON checkpoint)
 # with TS04b (after a simulated process restart, reconnect+check_status+
 # get_result reaches a completed state). Done in-process — no subprocess —
-# to avoid the cost and complexity of mocking httpx across a fork. The
+# to avoid the cost and complexity of mocking httpx2 across a fork. The
 # runner's polling-loop contract is exercised directly via the same
 # methods _run_polling_loop calls in production.
 
@@ -1057,10 +1057,10 @@ def test_full_resume_lifecycle_after_simulated_process_restart() -> None:
     )
 
     # --- Phase 3: reconnect from request_id ---------------------------------
-    reconnect_response = httpx.Response(
+    reconnect_response = httpx2.Response(
         status_code=200,
         json={"id": persisted_request_id, "status": "IN_PROGRESS"},
-        request=httpx.Request(
+        request=httpx2.Request(
             "GET", f"https://api.perplexity.ai/v1/async/sonar/{persisted_request_id}"
         ),
     )
@@ -1069,10 +1069,10 @@ def test_full_resume_lifecycle_after_simulated_process_restart() -> None:
         search_results=[{"url": "https://x.example/1", "title": "Source One"}],
         total_cost=1.3201,
     )
-    completed_response = httpx.Response(
+    completed_response = httpx2.Response(
         status_code=200,
         json=completed_payload,
-        request=httpx.Request(
+        request=httpx2.Request(
             "GET", f"https://api.perplexity.ai/v1/async/sonar/{persisted_request_id}"
         ),
     )
@@ -1118,9 +1118,9 @@ def test_resume_after_404_raises_provider_error_with_ttl_message() -> None:
         config={"model": "sonar-deep-research", "kind": "background"},
     )
 
-    request = httpx.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-expired")
-    response = httpx.Response(status_code=404, content=b"{}", request=request)
-    err = httpx.HTTPStatusError("404", request=request, response=response)
+    request = httpx2.Request("GET", "https://api.perplexity.ai/v1/async/sonar/req-expired")
+    response = httpx2.Response(status_code=404, content=b"{}", request=request)
+    err = httpx2.HTTPStatusError("404", request=request, response=response)
 
     fake_client = AsyncMock()
     fake_client.get = AsyncMock(side_effect=err)

@@ -88,7 +88,7 @@ test-lint:
 # Type check test suite
 [group: 'quality']
 test-typecheck:
-    uv tool run ty check doxa_test
+    uv run --frozen ty check --python "$(uv run --frozen python -c 'import sys; print(sys.executable)')" doxa_test
 
 # Auto-fix and format test suite
 [group: 'quality']

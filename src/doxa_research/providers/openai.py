@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from uuid import uuid4
 
-import httpx
+import httpx2
 import openai
 from openai import AsyncOpenAI
 from tenacity import (
@@ -310,7 +310,7 @@ class OpenAIProvider(ResearchProvider):
 
         # Add timeout configuration
         timeout = self.config.get("timeout", 30.0)
-        self.client = AsyncOpenAI(api_key=api_key, timeout=httpx.Timeout(timeout, connect=5.0))
+        self.client = AsyncOpenAI(api_key=api_key, timeout=httpx2.Timeout(timeout, connect=5.0))
 
     def _resolve_provider_config_value(
         self,

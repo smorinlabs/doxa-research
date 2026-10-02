@@ -295,20 +295,20 @@ def test_perplexity_extra_body_reaches_sync_extra_body_and_async_request() -> No
 
 
 def _make_openai_exc(cls_name: str, status: int = 400, body: Any = None) -> BaseException:
-    """Build a fake openai.* SDK exception with a real httpx.Request anchor."""
-    import httpx
+    """Build a fake openai.* SDK exception with a real httpx2.Request anchor."""
+    import httpx2
     import openai
 
     cls = getattr(openai, cls_name)
     msg = f"fake-{cls_name}"
-    request = httpx.Request("POST", "https://api.perplexity.ai/chat/completions")
+    request = httpx2.Request("POST", "https://api.perplexity.ai/chat/completions")
     if cls is openai.APITimeoutError:
         return cls(request=request)
     if cls is openai.APIConnectionError:
         return cls(message=msg, request=request)
     if cls is openai.APIError:
         return cls(message=msg, request=request, body=body)
-    response = httpx.Response(status_code=status, request=request)
+    response = httpx2.Response(status_code=status, request=request)
     return cls(message=msg, response=response, body=body)
 
 
@@ -904,14 +904,14 @@ def test_perplexity_sync_maps_402_status_code_to_api_quota_error() -> None:
     so any APIStatusError-shaped exception with that status code is upgraded
     to APIQuotaError before the generic APIError catch-all.
     """
-    import httpx
+    import httpx2
     import openai
 
     from doxa_research.errors import APIQuotaError
     from doxa_research.providers.perplexity import _map_perplexity_error
 
-    request = httpx.Request("POST", "https://api.perplexity.ai/chat/completions")
-    response = httpx.Response(status_code=402, request=request)
+    request = httpx2.Request("POST", "https://api.perplexity.ai/chat/completions")
+    response = httpx2.Response(status_code=402, request=request)
     exc = openai.BadRequestError(message="402 from upstream", response=response, body=None)
     result = _map_perplexity_error(exc)
     assert isinstance(result, APIQuotaError), (
@@ -981,11 +981,11 @@ def _bad_request_with_message(message: str, body: Any = None) -> BaseException:
     Task 2.4 we need to control the exact wording so the regex extraction
     has something to find.
     """
-    import httpx
+    import httpx2
     import openai
 
-    request = httpx.Request("POST", "https://api.perplexity.ai/chat/completions")
-    response = httpx.Response(status_code=400, request=request)
+    request = httpx2.Request("POST", "https://api.perplexity.ai/chat/completions")
+    response = httpx2.Response(status_code=400, request=request)
     return openai.BadRequestError(message=message, response=response, body=body)
 
 
