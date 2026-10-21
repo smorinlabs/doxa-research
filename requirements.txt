@@ -20,7 +20,7 @@ distro==1.9.0
     # retained from the existing legacy export
 h11==0.16.0
     # via httpcore2
-httpcore2==2.13.1
+httpcore2==2.14.0
     # via httpx2
 httpx2==2.13.1
     # via openai
