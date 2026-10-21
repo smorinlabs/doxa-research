@@ -678,7 +678,12 @@ class PerplexityProvider(ResearchProvider):
                     f"Invalid Agent {key}; expected a positive integer"
                     + (" at most 100" if maximum else "")
                 )
-        search = dict(options.get("web_search_options") or {})
+        search_options = options.get("web_search_options")
+        if search_options is not None and not isinstance(search_options, dict):
+            raise _agent_error(
+                "Agent web_search_options must be a mapping; use a table or Agent tools"
+            )
+        search = dict(search_options) if search_options is not None else {}
         if set(search) - {"search_context_size", "user_location"}:
             raise _agent_error("Unsupported legacy web_search_options; use Agent tools")
         if filters & options.keys():

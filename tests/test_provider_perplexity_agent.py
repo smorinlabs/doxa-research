@@ -408,6 +408,169 @@ def test_agent_mapped_search_overrides_do_not_add_other_preset_tools() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "invalid",
+    ["low", "", 1, 0, True, False, [], ["low"], [["search_context_size", "low"]]],
+    ids=[
+        "string",
+        "empty-string",
+        "integer",
+        "zero",
+        "true",
+        "false",
+        "empty-list",
+        "list",
+        "pairs",
+    ],
+)
+@pytest.mark.parametrize("placement", ["namespace", "extra_body"])
+def test_agent_invalid_web_search_options_is_actionable_before_http(invalid, placement) -> None:
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        raise AssertionError("Invalid web_search_options must not reach HTTP")
+
+    options = {"web_search_options": invalid}
+    if placement == "extra_body":
+        options = {"extra_body": options}
+
+    async def run():
+        async with _provider(respond, {"perplexity": options}) as provider:
+            with pytest.raises(ProviderError, match="web_search_options must be a mapping"):
+                await provider.submit("query", "perplexity_deep_research")
+
+    asyncio.run(run())
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "configured",
+    ['"low"', "false", "0", "[]", '[["search_context_size", "low"]]'],
+    ids=["string", "false", "zero", "empty-list", "pairs"],
+)
+def test_agent_loaded_mode_rejects_non_mapping_search_options_before_http(
+    tmp_path, configured
+) -> None:
+    from doxa_research.config import ConfigManager
+    from doxa_research.providers import create_provider
+
+    path = tmp_path / "doxa.config.toml"
+    path.write_text(
+        'version = "2.0"\n'
+        "[modes.invalid_search]\n"
+        'provider = "perplexity"\n'
+        'model = "sonar-deep-research"\n'
+        'kind = "background"\n'
+        "[modes.invalid_search.perplexity]\n"
+        f"web_search_options = {configured}\n"
+    )
+    config = ConfigManager(config_path=path)
+    config.load_all_layers({})
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        raise AssertionError("Invalid configured web_search_options must not reach HTTP")
+
+    async def run():
+        provider = cast(
+            PerplexityProvider,
+            create_provider(
+                "perplexity",
+                config,
+                cli_api_key="offline-key",
+                mode_config=config.get_mode_config("invalid_search"),
+            ),
+        )
+        await provider._async_http.aclose()
+        provider._async_http = httpx2.AsyncClient(
+            base_url="https://api.perplexity.ai", transport=httpx2.MockTransport(respond)
+        )
+        try:
+            with pytest.raises(ProviderError, match="web_search_options must be a mapping"):
+                await provider.submit("query", "invalid_search")
+        finally:
+            await provider._async_http.aclose()
+            await provider.client.close()
+
+    asyncio.run(run())
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "options,expected_search",
+    [
+        ({}, None),
+        ({"web_search_options": None}, None),
+        ({"web_search_options": {}}, None),
+        ({"web_search_options": {"search_context_size": "low"}}, {"search_context_size": "low"}),
+        (
+            {"extra_body": {"web_search_options": {"user_location": {"city": "New York"}}}},
+            {"user_location": {"city": "New York"}},
+        ),
+        (
+            {
+                "extra_body": {"web_search_options": {"search_context_size": "low"}},
+                "web_search_options": {"search_context_size": "high"},
+                "search_domain_filter": ["example.org"],
+                "num_search_results": 3,
+            },
+            {
+                "search_context_size": "high",
+                "filters": {"search_domain_filter": ["example.org"]},
+                "max_results": 3,
+            },
+        ),
+        (
+            {
+                "extra_body": {"web_search_options": "superseded"},
+                "web_search_options": {"search_context_size": "high"},
+            },
+            {"search_context_size": "high"},
+        ),
+        (
+            {
+                "extra_body": {"web_search_options": {"search_context_size": "low"}},
+                "web_search_options": None,
+            },
+            None,
+        ),
+    ],
+    ids=[
+        "absent",
+        "none",
+        "empty-mapping",
+        "context",
+        "extra-body-location",
+        "namespace-wins",
+        "invalid-extra-body-overridden",
+        "none-overrides-extra-body",
+    ],
+)
+def test_agent_valid_web_search_options_preserves_legacy_wire_and_precedence(
+    options, expected_search
+) -> None:
+    bodies = []
+    original = json.dumps(options, sort_keys=True)
+
+    def respond(request):
+        bodies.append(json.loads(request.content))
+        return httpx2.Response(200, json=_payload())
+
+    async def run():
+        async with _provider(respond, {"perplexity": options}) as provider:
+            assert await provider.submit("query", "perplexity_deep_research") == "agent:opaque-id"
+
+    asyncio.run(run())
+    assert len(bodies) == 1
+    if expected_search is None:
+        assert "tools" not in bodies[0]
+    else:
+        assert bodies[0]["tools"] == [{"type": "web_search", **expected_search}]
+    assert json.dumps(options, sort_keys=True) == original
+
+
 @pytest.mark.parametrize("status", ["completed", "cancelled"])
 def test_agent_cancel_terminal_race_is_verified_by_get(status) -> None:
     calls = []

@@ -48,6 +48,8 @@ PR #176's merge flow on 2026-10-20. Merge remains subject to current review and 
       checkpoints, resume, interrupts and mixed-provider operations. Track the
       [outside-diff review](https://github.com/smorinlabs/doxa-research/pull/176#pullrequestreview-5394134704)
       separately from the Agent migration's existing local-cancellation contract.
+- [x] [P44-T09] Reject malformed background `web_search_options` with an actionable
+      provider configuration error before HTTP, preserving valid legacy mappings.
 
 ## Review closeout on 2026-10-20
 
@@ -58,6 +60,11 @@ annotations while preserving independent search results, preserve the actual
 upstream terminal state and error detail, and collect referenced Markdown from
 bounded test or checkout output roots. Missing or rejected output references are
 reported without changing the test-acceptance policy.
+
+The next review reproduced raw Python exceptions or silent coercion for malformed
+background `web_search_options`. Agent request validation now rejects non-mapping
+values before HTTP. Absent values, `None` and valid mappings retain their existing
+behavior; immediate Sonar configuration is unchanged.
 
 These repairs use offline regression and repository checks. The 54/54 paid batch
 below remains historical evidence for `b55ef98f`; it is not a live run of the
