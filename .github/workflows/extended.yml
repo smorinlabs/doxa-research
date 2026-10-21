@@ -58,7 +58,7 @@ jobs:
       !inputs.migration_acceptance && !inputs.reconcile_existing_jobs
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: "3.11"
           enable-cache: true
@@ -101,7 +101,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: '3.11'
           enable-cache: true
@@ -221,7 +221,7 @@ jobs:
         scope: [extended, live_api, complete_openai, complete_perplexity, complete_gemini]
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: '3.11'
           enable-cache: true
@@ -383,7 +383,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           python-version: '3.11'
           enable-cache: true
