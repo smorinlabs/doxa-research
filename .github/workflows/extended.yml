@@ -200,7 +200,7 @@ jobs:
           PYCODE
       - name: Retain pre-paid selection manifest
         if: steps.preflight.outcome == 'success'
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: migration-${{ github.sha }}-selection
           path: ${{ runner.temp }}/migration-selection.json
@@ -368,7 +368,7 @@ jobs:
             --expected-count "$expected"
       - name: Retain sanitized per-test outcomes and operation IDs
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: migration-${{ github.sha }}-${{ matrix.scope }}
           path: ${{ runner.temp }}/migration-acceptance-sanitized/${{ matrix.scope }}
@@ -408,7 +408,7 @@ jobs:
           --output-dir "$RUNNER_TEMP/job-observation"
       - name: Retain sanitized one-shot observation
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: job-observation-${{ github.sha }}
           path: ${{ runner.temp }}/job-observation
