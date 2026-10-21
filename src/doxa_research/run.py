@@ -768,6 +768,15 @@ async def _maybe_cancel_upstream_and_raise(
                         ctx.console.print(f"[yellow]Already completed upstream:[/yellow] {name}")
                     elif status == "cancelled":
                         ctx.console.print(f"[yellow]Cancelled upstream:[/yellow] {name}")
+                    elif status == "permanent_error" and result.get("upstream_status") in {
+                        "failed",
+                        "incomplete",
+                    }:
+                        ctx.console.print(
+                            f"Already {result['upstream_status']} upstream: {name} "
+                            f"({result.get('error', '')})",
+                            markup=False,
+                        )
                     else:
                         ctx.console.print(
                             f"[yellow]Cancellation outcome unconfirmed:[/yellow] {name}"

@@ -296,6 +296,31 @@ def test_hung_cancel_unwinds_within_5s_envelope() -> None:
         ({"status": "already_terminal", "previous": "completed"}, "Already completed upstream"),
         ({"status": "cancelled", "best_effort": True}, "Cancellation outcome unconfirmed"),
         ({"status": "unknown"}, "Cancellation outcome unconfirmed"),
+        (
+            {
+                "status": "permanent_error",
+                "upstream_status": "failed",
+                "error": "Capacity exhausted",
+            },
+            "Already failed upstream: perplexity (Capacity exhausted)",
+        ),
+        (
+            {"status": "permanent_error", "upstream_status": "incomplete", "error": "Output limit"},
+            "Already incomplete upstream: perplexity (Output limit)",
+        ),
+        ({"status": "permanent_error"}, "Cancellation outcome unconfirmed"),
+        (
+            {"status": "permanent_error", "upstream_status": "in_progress"},
+            "Cancellation outcome unconfirmed",
+        ),
+        (
+            {"status": "unknown", "upstream_status": "failed"},
+            "Cancellation outcome unconfirmed",
+        ),
+        (
+            {"status": "permanent_error", "upstream_status": "failed", "best_effort": True},
+            "Cancellation outcome unconfirmed",
+        ),
     ],
 )
 def test_interrupt_cancel_reports_pending_terminal_and_uncertain_outcomes(result, expected):

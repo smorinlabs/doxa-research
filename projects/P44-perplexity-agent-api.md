@@ -10,14 +10,17 @@
 The fresh hosted batch passed all 54 tests on commit
 `b55ef98f6533f224b8adda94755f2898c14941a6`. Its saved-job follow-up confirmed
 terminal upstream states for all six observed IDs. Implementation and live
-acceptance are complete; the PR remains open without merge authorization.
+acceptance on that commit are complete. Subsequent review repairs and the
+remaining cancellation-policy follow-up are recorded below. The owner authorized
+the repair and merge flow on 2026-10-20; the PR remains open until that flow finishes.
 The original 53/54 failed run is preserved below as superseded evidence.
 
 **Goal:** Move background Perplexity research from retired async Sonar to the
 supported Agent API using raw HTTPX2. Preserve immediate/streaming Sonar.
 
 **Owner authorization:** Separate migration and live testing approved after
-PR #172 merged. Publication does not authorize merging this new PR.
+PR #172 merged. The owner approved the remaining repairs and completion of
+PR #176's merge flow on 2026-10-20. Merge remains subject to current review and CI gates.
 
 ## Tests and tasks
 
@@ -37,8 +40,38 @@ PR #172 merged. Publication does not authorize merging this new PR.
 - [x] [P44-TS04] Complete the three existing OpenAI, Perplexity and Gemini
       lifecycle smoke nodes. Carry P43-TS04's live gate forward.
 - [x] [P44-T05] Review exact source, publish a separate PR and record hosted outcomes.
+- [x] [P44-T06] Repair final-message citation selection and preserve failed/incomplete
+      cancellation outcomes through the provider, CLI, interrupt and cleanup paths.
+- [x] [P44-T07] Retain checkpoint-referenced Gemini output in sanitized live artifacts,
+      with bounded paths, redaction, deduplication and visible collection issues.
+- [ ] [P44-T08] Define consistent repeat-cancel and confirmation behavior across local
+      checkpoints, resume, interrupts and mixed-provider operations. Track the
+      [outside-diff review](https://github.com/smorinlabs/doxa-research/pull/176#pullrequestreview-5394134704)
+      separately from the Agent migration's existing local-cancellation contract.
 
-## Observed acceptance evidence
+## Review closeout on 2026-10-20
+
+Regression tests reproduced stale citations from superseded assistant messages,
+lost failed/incomplete terminal outcomes during cancellation reconciliation, and
+Gemini output omitted from artifacts. The repairs retain only the final answer's
+annotations while preserving independent search results, preserve the actual
+upstream terminal state and error detail, and collect referenced Markdown from
+bounded test or checkout output roots. Missing or rejected output references are
+reported without changing the test-acceptance policy.
+
+These repairs use offline regression and repository checks. The 54/54 paid batch
+below remains historical evidence for `b55ef98f`; it is not a live run of the
+later repair commit.
+
+P44-T08 is a separate cancellation-policy follow-up. Local cancellation currently
+stops the local operation even when upstream cancellation is pending. A repeated
+cancel returns `already_terminal`, but resume can reconnect to the same saved
+upstream ID and check it without creating another research job. A coherent policy
+change must cover repeat cancellation, resume checkpoint consistency, interrupts,
+mixed providers and both JSON and text output. The review's narrower proposed
+checkpoint change is not applied in this repair.
+
+## Historical acceptance evidence on 2026-10-02
 
 The fresh [run 37029071053](https://github.com/smorinlabs/doxa-research/actions/runs/37029071053)
 attempt 1 concluded success on commit
@@ -77,10 +110,10 @@ The observer issued six GET requests, created no jobs and cancelled no jobs.
 No saved job in this follow-up remains pending or unknown. The test ledger and
 sanitized receipts preserve the individual OpenAI IDs and request outcomes.
 
-This follow-up changes only the P43/P44 tracking documents. Runtime, test,
-SDK lock and workflow bytes remain those tested at
-`b55ef98f6533f224b8adda94755f2898c14941a6`. PR #176 remains open, and merging
-it has not been authorized.
+The 2026-10-02 follow-up commit `47e84dd` changed only the P43/P44 tracking
+documents. Its runtime, test, SDK lock and workflow bytes matched those tested
+at `b55ef98f6533f224b8adda94755f2898c14941a6`. Merge had not been authorized
+at that point. The later 2026-10-20 repairs above are validated separately.
 
 Agent preset `high` supplies upstream model/reasoning defaults. Product defaults
 are not capped. Live fixtures use max_steps=10/max_output_tokens=8192, retain

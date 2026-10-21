@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 PROVIDER_KEY_NAMES = ("OPENAI_API_KEY", "PERPLEXITY_API_KEY", "GEMINI_API_KEY")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def redact(text: str) -> str:
@@ -17,6 +18,48 @@ def redact(text: str) -> str:
         if value:
             text = text.replace(value, "[REDACTED]")
     return text
+
+
+def output_paths(source: Path, operations: list[dict]) -> tuple[list[Path], list[dict]]:
+    """Find test Markdown and referenced checkout outputs without following escapes."""
+    temporary_root = source.resolve() / "tmp"
+    checkout_root = REPO_ROOT.resolve()
+    checkout_output_root = checkout_root / "research-outputs"
+    candidates = [(path, None) for path in temporary_root.rglob("*.md")]
+    issues = []
+    for operation in operations:
+        references = operation.get("output_paths")
+        if isinstance(references, dict):
+            for reference in references.values():
+                if isinstance(reference, str) and reference:
+                    path = Path(reference)
+                    candidates.append(
+                        (path if path.is_absolute() else checkout_root / path, reference)
+                    )
+                else:
+                    issues.append({"path": reference, "reason": "invalid_reference"})
+    retained = set()
+    for candidate, reference in candidates:
+        reason = None
+        try:
+            path = candidate.resolve(strict=True)
+            if not (
+                path.is_relative_to(temporary_root) or path.is_relative_to(checkout_output_root)
+            ):
+                reason = "outside_allowed_roots"
+            elif path.suffix != ".md":
+                reason = "not_markdown"
+            elif not path.is_file():
+                reason = "not_file"
+            else:
+                retained.add(path)
+        except FileNotFoundError:
+            reason = "missing"
+        except (OSError, RuntimeError, ValueError):
+            reason = "invalid_or_unreadable"
+        if reference is not None and reason:
+            issues.append({"path": reference, "reason": reason})
+    return sorted(retained), issues
 
 
 def collect(source: Path, destination: Path, expected_count: int) -> dict:
@@ -94,9 +137,12 @@ def collect(source: Path, destination: Path, expected_count: int) -> dict:
     (destination / "operations.json").write_text(redact(json.dumps(operations, indent=2)) + "\n")
     # Output markdown has final text and optional reported provider cost.
     output_dir = destination / "outputs"
-    for index, path in enumerate((source / "tmp").rglob("*.md")):
+    paths, output_issues = output_paths(source, operations)
+    for index, path in enumerate(paths):
         output_dir.mkdir(exist_ok=True)
-        (output_dir / f"{index}-{path.name}").write_text(redact(path.read_text(errors="replace")))
+        (output_dir / f"{index}-{redact(path.name)}").write_text(
+            redact(path.read_text(errors="replace"))
+        )
     receipt_files = []
     unknown_submissions = 0
     for index, path in enumerate((source / "tmp").rglob("*receipt*.json")):
@@ -160,6 +206,7 @@ def collect(source: Path, destination: Path, expected_count: int) -> dict:
         "counts": counts,
         "cases": results,
         "checkpoint_operations": len(operations),
+        "output_collection_issues": output_issues,
         "accepted": head_bound
         and selection_matches
         and code == 0

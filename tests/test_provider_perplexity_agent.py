@@ -133,6 +133,7 @@ def test_agent_status_translation(upstream, expected) -> None:
             result = await provider.check_status("agent:opaque-id")
             assert result["status"] == expected
             if expected == "permanent_error":
+                assert result["upstream_status"] == upstream
                 assert "provider detail" in result["error"]
 
     asyncio.run(run())
@@ -407,7 +408,8 @@ def test_agent_mapped_search_overrides_do_not_add_other_preset_tools() -> None:
     ]
 
 
-def test_agent_cancel_terminal_race_is_verified_by_get() -> None:
+@pytest.mark.parametrize("status", ["completed", "cancelled"])
+def test_agent_cancel_terminal_race_is_verified_by_get(status) -> None:
     calls = []
 
     def respond(request):
@@ -415,15 +417,193 @@ def test_agent_cancel_terminal_race_is_verified_by_get() -> None:
         return (
             httpx2.Response(400, json={})
             if request.method == "POST"
-            else httpx2.Response(200, json=_payload("completed"))
+            else httpx2.Response(200, json=_payload(status))
         )
 
     async def run():
         async with _provider(respond) as provider:
-            assert (await provider.cancel("agent:opaque-id"))["status"] == "completed"
+            assert (await provider.cancel("agent:opaque-id"))["status"] == status
 
     asyncio.run(run())
     assert calls == ["POST", "GET"]
+
+
+@pytest.mark.parametrize("status", ["failed", "incomplete"])
+@pytest.mark.parametrize("detail", ["Research capacity exhausted", None])
+def test_agent_cancel_terminal_failure_preserves_status_and_error(status, detail) -> None:
+    calls = []
+    payload = _payload(status, error={"message": detail})
+
+    def respond(request):
+        calls.append((request.method, request.url.path))
+        if request.method == "POST":
+            return httpx2.Response(400, json={"error": {"message": "already terminal"}})
+        return httpx2.Response(200, json=payload)
+
+    async def run():
+        async with _provider(respond) as provider:
+            result = await provider.cancel("agent:opaque-id")
+            assert result["status"] == "permanent_error"
+            assert result["upstream_status"] == status
+            assert result["error"] == (
+                f"Agent response {status}: {detail}" if detail else f"Agent response {status}"
+            )
+            assert provider.jobs["agent:opaque-id"]["response_data"] == payload
+            assert provider.jobs["agent:opaque-id"]["validated"] is True
+
+    asyncio.run(run())
+    assert calls == [("POST", "/v1/agent/opaque-id/cancel"), ("GET", "/v1/agent/opaque-id")]
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress", "future_status"])
+def test_agent_cancel_reconciliation_never_claims_unconfirmed_terminal_state(status) -> None:
+    calls = []
+
+    def respond(request):
+        calls.append(request.method)
+        return (
+            httpx2.Response(400, json={})
+            if request.method == "POST"
+            else httpx2.Response(200, json=_payload(status))
+        )
+
+    async def run():
+        async with _provider(respond) as provider:
+            with pytest.raises(
+                ProviderError, match=status if status != "future_status" else "unknown"
+            ):
+                await provider.cancel("agent:opaque-id")
+
+    asyncio.run(run())
+    assert calls == ["POST", "GET"]
+
+
+@pytest.mark.parametrize("status", ["failed", "incomplete"])
+@pytest.mark.parametrize("as_json", [False, True], ids=["text", "json"])
+def test_agent_cancel_terminal_failure_reaches_cli_with_upstream_detail(
+    isolated_doxa_home, checkpoint_dir, tmp_path, monkeypatch, status, as_json
+) -> None:
+    from doxa_research import commands
+    from doxa_research import providers as registry
+    from tests._fixture_helpers import write_test_checkpoint
+
+    monkeypatch.chdir(tmp_path)
+    op_id = "research-20261020-agent-terminal-cancel"
+    write_test_checkpoint(
+        checkpoint_dir,
+        op_id,
+        status="running",
+        providers={"perplexity": {"status": "running", "job_id": "agent:opaque-id"}},
+        mode="perplexity_deep_research",
+    )
+    calls = []
+    detail = "Research capacity exhausted"
+
+    def respond(request):
+        calls.append((request.method, request.url.path))
+        return (
+            httpx2.Response(400, json={})
+            if request.method == "POST"
+            else httpx2.Response(200, json=_payload(status, error={"message": detail}))
+        )
+
+    cancel_operation = commands.cancel_operation
+
+    async def scoped_cancel(*args, **kwargs):
+        async with _provider(respond) as provider:
+            monkeypatch.setattr(registry, "create_provider", lambda *a, **kw: provider)
+            return await cancel_operation(*args, **kwargs)
+
+    monkeypatch.setattr(commands, "cancel_operation", scoped_cancel)
+    result = CliRunner().invoke(cli, ["cancel", op_id, *(["--json"] if as_json else [])])
+    assert result.exit_code == 0, result.output
+    if as_json:
+        provider_result = json.loads(result.output)["data"]["providers"]["perplexity"]
+        assert provider_result == {
+            "status": "permanent_error",
+            "upstream_status": status,
+            "error": f"Agent response {status}: {detail}",
+        }
+    else:
+        assert f"Agent response {status}: {detail}" in result.output
+        assert "cancelled upstream" not in result.output
+        assert "confirmation is pending" not in result.output
+    saved = json.loads((checkpoint_dir / f"{op_id}.json").read_text())
+    assert saved["status"] == "cancelled"  # The existing contract cancels the local operation.
+    assert saved["providers"]["perplexity"]["job_id"] == "agent:opaque-id"
+    assert calls == [("POST", "/v1/agent/opaque-id/cancel"), ("GET", "/v1/agent/opaque-id")]
+
+
+@pytest.mark.parametrize("search_position", [0, 1, 2], ids=["before", "between", "after"])
+@pytest.mark.parametrize(
+    "searched_earlier_url", [False, True], ids=["annotation-only", "also-searched"]
+)
+def test_agent_final_answer_discards_old_annotations_but_preserves_search_results(
+    search_position, searched_earlier_url
+) -> None:
+    def message(text, urls, **extra):
+        return {
+            "type": "message",
+            "id": "msg",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": text,
+                    "annotations": [
+                        {"type": "url_citation", "url": url, "title": url.rsplit("/", 1)[-1]}
+                        for url in urls
+                    ],
+                }
+            ],
+            **extra,
+        }
+
+    earlier_url = "https://example.org/superseded"
+    final_url = "https://example.org/final"
+    final_detail_url = "https://example.org/detail"
+    searched_url = "https://example.org/independent-search"
+    output = [
+        message("Superseded answer", [earlier_url]),
+        message("Final answer.", [final_url]),
+    ]
+    output[1]["content"].extend(message("Final detail.", [final_detail_url])["content"])
+    search_urls = [searched_url, *([earlier_url] if searched_earlier_url else [])]
+    output.insert(
+        search_position,
+        {
+            "type": "search_results",
+            "results": [{"url": url, "title": url.rsplit("/", 1)[-1]} for url in search_urls],
+        },
+    )
+    output.insert(
+        0, message("Initial commentary", ["https://example.org/commentary"], phase="commentary")
+    )
+    output.extend(
+        [
+            message("Trailing commentary", ["https://example.org/trailing"], phase="commentary"),
+            {"type": "function_call_output", "output": "PRIVATE_TOOL_OUTPUT"},
+        ]
+    )
+
+    def respond(request):
+        return httpx2.Response(200, json=_payload("completed", output=output))
+
+    async def run():
+        async with _provider(respond) as provider:
+            await provider.reconnect("agent:opaque-id")
+            result = await provider.get_result("agent:opaque-id")
+            assert result.startswith("Final answer.\n\nFinal detail.\n\n## Sources")
+            assert result.count(final_url) == 1
+            assert result.count(final_detail_url) == 1
+            assert result.count(searched_url) == 1
+            assert result.count(earlier_url) == (1 if searched_earlier_url else 0)
+            assert "Superseded answer" not in result
+            assert "commentary" not in result and "trailing" not in result
+            assert "PRIVATE_TOOL_OUTPUT" not in result
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize("status", ["queued", "in_progress"])

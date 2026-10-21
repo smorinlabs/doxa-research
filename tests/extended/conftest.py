@@ -203,6 +203,10 @@ def cleanup_saved_provider_jobs(env: dict[str, str], state_root: Path, provider:
                 if status == "cancelling"
                 else "confirmed_terminal"
                 if status in {"cancelled", "completed"}
+                or (
+                    status == "permanent_error"
+                    and result.get("upstream_status") in {"failed", "incomplete"}
+                )
                 else "unknown"
             )
         except Exception as exc:

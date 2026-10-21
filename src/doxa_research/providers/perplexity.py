@@ -900,12 +900,7 @@ class PerplexityProvider(ResearchProvider):
         job_info["response_data"] = payload
         job_info["validated"] = True
         self.model = payload.get("model") or self._routing_model
-        translated = _translate_provider_status(payload["status"], _PERPLEXITY_STATUS_TABLE)
-        if payload["status"] in {"failed", "incomplete"}:
-            error = payload.get("error") or {}
-            translated["error"] = error.get("message") if isinstance(error, dict) else None
-            translated["error"] = translated["error"] or f"Agent response {payload['status']}"
-        return translated
+        return _translate_agent_status(payload)
 
     async def reconnect(self, job_id: str) -> None:
         """Restore an Agent checkpoint without creating a new upstream request."""
@@ -946,9 +941,10 @@ class PerplexityProvider(ResearchProvider):
                 ) from exc
             if exc.response.status_code == 400:
                 await self.reconnect(job_id)
-                status = self.jobs[job_id]["response_data"]["status"]
-                if status in {"completed", "cancelled"}:
-                    return {"status": status}
+                payload = self.jobs[job_id]["response_data"]
+                status = payload["status"]
+                if status in {"completed", "cancelled", "failed", "incomplete"}:
+                    return _translate_agent_status(payload)
                 raise _agent_error(f"Cancellation rejected; Agent response is {status}") from exc
             raise _map_perplexity_error_async(exc, model=self.model) from exc
         except Exception as exc:
@@ -1008,6 +1004,18 @@ def _agent_response_id(job_id: str) -> str:
     return response_id
 
 
+def _translate_agent_status(payload: dict[str, Any]) -> dict[str, Any]:
+    """Preserve confirmed upstream failures within the shared provider status contract."""
+    status = payload["status"]
+    translated = _translate_provider_status(status, _PERPLEXITY_STATUS_TABLE)
+    if status in {"failed", "incomplete"}:
+        error = payload.get("error") or {}
+        detail = error.get("message") if isinstance(error, dict) else None
+        translated["upstream_status"] = status
+        translated["error"] = f"Agent response {status}" + (f": {detail}" if detail else "")
+    return translated
+
+
 def _decode_agent_response(
     response: httpx2.Response, expected_id: str | None = None
 ) -> dict[str, Any]:
@@ -1039,7 +1047,8 @@ def _decode_agent_response(
 
 def _format_agent_response(payload: dict[str, Any]) -> str:
     text: list[str] = []
-    sources: list[dict[str, Any]] = []
+    answer_sources: list[dict[str, Any]] = []
+    search_sources: list[dict[str, Any]] = []
     for item in payload["output"]:
         if not isinstance(item, dict):
             raise _agent_error("Malformed Agent output item")
@@ -1054,6 +1063,7 @@ def _format_agent_response(payload: dict[str, Any]) -> str:
                 continue
             # Earlier assistant messages may be commentary; render the final one.
             text = []
+            answer_sources = []
             if not isinstance(item.get("content"), list):
                 raise _agent_error("Malformed Agent assistant content")
             for content in item["content"]:
@@ -1066,18 +1076,18 @@ def _format_agent_response(payload: dict[str, Any]) -> str:
                 text.append(content["text"])
                 for citation in content.get("annotations") or []:
                     if isinstance(citation, dict) and citation.get("type") == "url_citation":
-                        sources.append(citation)
+                        answer_sources.append(citation)
         elif item.get("type") == "search_results":
             if not isinstance(item.get("results"), list):
                 raise _agent_error("Malformed Agent search results")
-            sources.extend(item["results"])
+            search_sources.extend(item["results"])
     answer = "\n\n".join(text).strip()
     if not answer:
         raise _agent_error(
             "Completed Agent response has no assistant answer",
             suggestion="Inspect the stored response ID; no new request was submitted.",
         )
-    source_block = _format_async_sources_block(sources)
+    source_block = _format_async_sources_block([*answer_sources, *search_sources])
     if source_block:
         answer += "\n\n" + source_block
     usage = payload.get("usage") or {}

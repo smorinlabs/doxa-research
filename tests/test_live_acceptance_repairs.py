@@ -80,6 +80,144 @@ def test_exact_module_class_and_parameter_identity_is_accepted(
     assert result["accepted"] is True
 
 
+def collect_output_packet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output_paths: dict
+) -> list[Path]:
+    collector = module("actual_output_collector", "scripts/collect_live_acceptance.py")
+    monkeypatch.setattr(collector, "REPO_ROOT", tmp_path / "checkout", raising=False)
+    source = tmp_path / "raw"
+    checkpoints = source / "tmp" / "state" / "checkpoints"
+    checkpoints.mkdir(parents=True)
+    (source / "source.json").write_text(json.dumps({"reviewed_head": HEAD, "checkout_head": HEAD}))
+    (source / "collected.txt").write_text("tests/a.py::test_completed\n")
+    (source / "process-exit-code.txt").write_text("0")
+    (source / "junit.xml").write_text(
+        '<testsuites><testsuite><testcase classname="tests.a" name="test_completed"/>'
+        "</testsuite></testsuites>"
+    )
+    (checkpoints / "research-completed.json").write_text(
+        json.dumps(
+            {
+                "id": "research-completed",
+                "status": "completed",
+                "providers": {"gemini": {"status": "completed"}},
+                "output_paths": output_paths,
+            }
+        )
+    )
+    collector.collect(source, tmp_path / "sanitized", 1)
+    return sorted((tmp_path / "sanitized" / "outputs").glob("*.md"))
+
+
+@pytest.mark.parametrize("absolute", [False, True])
+def test_checkpoint_referenced_checkout_output_is_retained_and_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, absolute: bool
+) -> None:
+    output = tmp_path / "checkout" / "research-outputs" / "gemini-answer.md"
+    output.parent.mkdir(parents=True)
+    output.write_text("Final Gemini answer with offline-provider-secret")
+    monkeypatch.setenv("GEMINI_API_KEY", "offline-provider-secret")
+    reference = str(output) if absolute else "research-outputs/gemini-answer.md"
+
+    retained = collect_output_packet(tmp_path, monkeypatch, {"gemini": reference})
+
+    assert len(retained) == 1
+    assert retained[0].read_text() == "Final Gemini answer with [REDACTED]"
+
+
+def test_collector_deduplicates_references_and_retains_equal_basenames(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    temporary = tmp_path / "raw" / "tmp" / "outputs" / "answer.md"
+    temporary.parent.mkdir(parents=True)
+    temporary.write_text("Temporary output")
+    checkout = tmp_path / "checkout" / "research-outputs" / "answer.md"
+    checkout.parent.mkdir(parents=True)
+    checkout.write_text("Checkout output")
+    (checkout.parent / "unreferenced.md").write_text("Must not sweep checkout Markdown")
+
+    retained = collect_output_packet(
+        tmp_path,
+        monkeypatch,
+        {"openai": str(temporary), "gemini": str(checkout), "duplicate": str(checkout)},
+    )
+
+    assert len(retained) == 2
+    assert {path.read_text() for path in retained} == {"Temporary output", "Checkout output"}
+
+
+@pytest.mark.parametrize("location", ["parent", "checkout", "prefix", "non_markdown"])
+def test_collector_rejects_checkpoint_outputs_outside_allowed_markdown_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, location: str
+) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    paths = {
+        "parent": tmp_path / "private.md",
+        "checkout": checkout / "README.md",
+        "prefix": checkout / "research-outputs-private" / "secret.md",
+        "non_markdown": checkout / "research-outputs" / "credentials.env",
+    }
+    output = paths[location]
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("Must not upload")
+    reference = "../private.md" if location == "parent" else str(output)
+
+    assert collect_output_packet(tmp_path, monkeypatch, {"gemini": reference}) == []
+
+
+@pytest.mark.parametrize("location", ["temporary", "checkout_file", "checkout_directory"])
+def test_collector_rejects_output_symlinks_that_escape_allowed_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, location: str
+) -> None:
+    private = tmp_path / "private" / "private.md"
+    private.parent.mkdir()
+    private.write_text("Must not upload")
+    root = (
+        tmp_path / "raw" / "tmp"
+        if location == "temporary"
+        else tmp_path / "checkout" / "research-outputs"
+    )
+    if location == "checkout_directory":
+        root.parent.mkdir()
+        root.symlink_to(private.parent, target_is_directory=True)
+        output = root / "private.md"
+    else:
+        root.mkdir(parents=True)
+        output = root / "answer.md"
+        output.symlink_to(private)
+
+    assert collect_output_packet(tmp_path, monkeypatch, {"gemini": str(output)}) == []
+
+
+def test_collector_ignores_missing_or_malformed_output_references(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "offline-provider-secret")
+    assert (
+        collect_output_packet(
+            tmp_path,
+            monkeypatch,
+            {
+                "missing": "research-outputs/missing-offline-provider-secret.md",
+                "null": None,
+                "list": ["not a path"],
+            },
+        )
+        == []
+    )
+    outcome = json.loads((tmp_path / "sanitized" / "outcome.json").read_text())
+    issues = outcome["output_collection_issues"]
+    expected = [
+        {"path": "research-outputs/missing-[REDACTED].md", "reason": "missing"},
+        {"path": None, "reason": "invalid_reference"},
+        {"path": ["not a path"], "reason": "invalid_reference"},
+    ]
+    assert len(issues) == len(expected)
+    assert all(issue in issues for issue in expected)
+    assert outcome["accepted"] is True, "Missing retained text must not change acceptance policy"
+
+
 @pytest.mark.parametrize(
     "provider,local_status",
     [
