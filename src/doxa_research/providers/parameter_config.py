@@ -50,6 +50,8 @@ PROVIDER_NATIVE_REQUEST_KEYS: frozenset[str] = frozenset(
         "frequency_penalty",
         "include_thoughts",
         "max_tokens",
+        "max_steps",
+        "preset",
         "max_tool_calls",
         "n",
         "presence_penalty",
@@ -62,6 +64,12 @@ PROVIDER_NATIVE_REQUEST_KEYS: frozenset[str] = frozenset(
         "safety_settings",
         "search_context_size",
         "search_domain_filter",
+        "search_recency_filter",
+        "search_after_date_filter",
+        "search_before_date_filter",
+        "last_updated_after_filter",
+        "last_updated_before_filter",
+        "num_search_results",
         "seed",
         "stop",
         "stream_mode",
@@ -274,6 +282,39 @@ def _provider_namespace(layer: dict[str, Any] | None, provider_name: str) -> dic
     return namespace if isinstance(namespace, dict) else None
 
 
+def _resolve_agent_token_aliases(runtime: ProviderRuntimeConfig) -> None:
+    """Apply configuration precedence across the Agent API's token-limit aliases."""
+    if runtime.provider_name != "perplexity" or runtime.routing.get("kind") != "background":
+        return
+    native_key = "max_output_tokens"
+    legacy_key = "max_tokens"
+    if native_key not in runtime.common_request or legacy_key not in runtime.provider_request:
+        return
+
+    native_source = runtime.sources[f"common_request.{native_key}"]
+    legacy_source = runtime.sources[f"provider_request.{legacy_key}"]
+    layer_priority = {
+        "providers.defaults": 0,
+        "providers.perplexity": 1,
+        "mode_config": 2,
+        "mode_config.perplexity": 3,
+    }
+    if native_source == legacy_source and (
+        runtime.common_request[native_key] != runtime.provider_request[legacy_key]
+    ):
+        raise ValueError(
+            f"Conflicting max_tokens and max_output_tokens in {native_source}; use one token limit"
+        )
+    # Keep the winning alias and its provenance. Equal aliases in one layer
+    # coalesce to the native spelling; immediate Sonar keeps its existing path.
+    if layer_priority[native_source] >= layer_priority[legacy_source]:
+        del runtime.provider_request[legacy_key]
+        del runtime.sources[f"provider_request.{legacy_key}"]
+    else:
+        del runtime.common_request[native_key]
+        del runtime.sources[f"common_request.{native_key}"]
+
+
 def build_provider_runtime_config(
     *,
     provider_name: str,
@@ -318,6 +359,7 @@ def build_provider_runtime_config(
         _provider_namespace(mode_config, provider_name),
         source=f"mode_config.{provider_name}",
     )
+    _resolve_agent_token_aliases(runtime)
 
     if timeout_override is not None:
         _merge_value(runtime.client, "timeout", timeout_override)

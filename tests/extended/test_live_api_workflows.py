@@ -365,23 +365,48 @@ def test_mismatch_defense_no_http(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Constructs a real `OpenAIProvider` with a deliberately mismatched
     `mode_config` (`kind="immediate"` but a background-only model) and asserts
-    `submit()` raises `ModeKindMismatchError` synchronously. No HTTP call.
+    `submit()` raises `ModeKindMismatchError` before any HTTP request.
 
     Uses a fake API key for provider construction; the mismatch check
     fires before the key is ever sent to OpenAI.
     """
-    from doxa_research.config import ConfigManager
+    import httpx2
+
+    from doxa_research.config import ConfigManager, requires_background_submission
     from doxa_research.errors import ModeKindMismatchError
-    from doxa_research.models import KNOWN_MODELS
     from doxa_research.providers import create_provider
+    from doxa_research.providers.openai import OpenAIProvider
+
+    requests: list[httpx2.Request] = []
+
+    async def forbid_http(self, request, *args, **kwargs):
+        requests.append(request)
+        pytest.fail("Mismatch validation attempted an HTTP request")
+
+    monkeypatch.setattr(httpx2.AsyncClient, "send", forbid_http)
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-fake-mismatch-defense-key")
 
-    bg_model = next(m.id for m in KNOWN_MODELS if m.provider == "openai" and m.kind == "background")
+    # This retired ID remains a local validation fixture. Registry background
+    # defaults such as gpt-5.6-sol can also run immediately and are not mismatches.
+    bg_model = "o3-deep-research"
+    assert requires_background_submission(bg_model)
     cm = ConfigManager()
     cm.load_all_layers({})
     mode_config = {"provider": "openai", "model": bg_model, "kind": "immediate"}
     provider = create_provider("openai", cm, mode_config=mode_config)
+    assert isinstance(provider, OpenAIProvider)
 
-    with pytest.raises(ModeKindMismatchError):
-        asyncio.run(provider.submit("ping", mode="_mismatch_check_"))
+    async def submit_and_close() -> None:
+        try:
+            with pytest.raises(ModeKindMismatchError) as exc:
+                await provider.submit("ping", mode="_mismatch_check_")
+            assert exc.value.model == bg_model
+            assert exc.value.declared_kind == "immediate"
+            assert exc.value.required_kind == "background"
+        finally:
+            await provider.client.close()
+
+    asyncio.run(submit_and_close())
+    assert not requests
+    assert provider.client.is_closed()

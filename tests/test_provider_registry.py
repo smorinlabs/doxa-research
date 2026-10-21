@@ -107,7 +107,8 @@ def test_perplexity_deep_research_mode_resolves_to_sonar_deep_research() -> None
     assert mode["kind"] == "background"
     perp_cfg = mode.get("perplexity")
     assert isinstance(perp_cfg, dict)
-    assert perp_cfg.get("reasoning_effort") == "high"
+    assert perp_cfg.get("preset") == "high"
+    assert "reasoning_effort" not in perp_cfg
 
 
 def test_create_provider_returns_perplexity_instance(

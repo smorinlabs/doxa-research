@@ -8,18 +8,17 @@ Gated by `@pytest.mark.live_api`. Default `pytest` skips this entire module
 Cost target — immediate (sync) tests: a few cents per full run (small ping
 prompts at search_context_size=low).
 
-Cost target — background (P27 sonar-deep-research) tests: ~$1.32 per run
-at reasoning_effort=high. Perplexity has no upstream cancel API (T01
-verified), so the upstream job continues billing even after `doxa cancel`
-marks the local checkpoint cancelled — there's no way to reduce cost by
-aborting early. Run this module weekly via the live-api workflow only.
+Background tests use the supported Agent API through the compatibility mode
+perplexity_deep_research. Test-only step/output limits bound individual work;
+there is no hard dollar cap. Fixture cleanup retains known IDs and requests
+best-effort cancellation. A cancel acknowledgment does not prove billing stopped.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
-import time
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +34,13 @@ from tests.extended.conftest import (
 
 pytestmark = [pytest.mark.live_api, pytest.mark.provider_perplexity]
 
-PERPLEXITY_BACKGROUND_STATUSES = {"queued", "running", "completed", "cancelled"}
+PERPLEXITY_BACKGROUND_STATUSES = {
+    "queued",
+    "running",
+    "completed",
+    "cancelled",
+    "in_progress",
+}
 
 
 def test_ext_pplx_imm_stream_default_mode_emits_grounded_answer(
@@ -166,13 +171,9 @@ web_search_options = { search_context_size = "low" }
 
 
 # =============================================================================
-# P27 — background deep-research lifecycle (sonar-deep-research / async API)
-# =============================================================================
-#
-# Cost: ~$1.32 per run at reasoning_effort=high. Perplexity has no upstream
-# cancel API (T01) — submitted jobs continue billing regardless of `doxa_research
-# cancel`. Tests below intentionally accept this cost; the live-api workflow
-# runs weekly.
+# Background Agent API lifecycle. Existing checkpoints keep the public mode name.
+# The isolated fixture provides max_steps=10/max_output_tokens=8192, and always
+# attempts cleanup for saved IDs after each case. Unknown creates are not retried.
 
 
 def _submit_perplexity_background_json(
@@ -223,9 +224,8 @@ def test_ext_pplx_bg_submit_async_persists_request_id(
     `resume --async --json` in a fresh subprocess to prove the user can exit
     after submission and later reconnect without blocking for completion.
 
-    NOTE: ~$1.32 per run; upstream job continues running after this test
-    returns and there is no way to stop it (T01). Cost is unavoidable; this
-    test intentionally does NOT call `doxa cancel`.
+    Fixture finalization requests cancellation of saved unfinished IDs and
+    retains the response. Accepted cancellation can remain pending upstream.
     """
     env, state_root = live_perplexity_env
     operation_id, _result, _elapsed = _submit_perplexity_background_json(
@@ -234,7 +234,9 @@ def test_ext_pplx_bg_submit_async_persists_request_id(
     )
 
     job_id = wait_for_provider_job_id(state_root, operation_id, provider="perplexity", timeout=60.0)
-    assert isinstance(job_id, str) and job_id, "expected non-empty Perplexity request_id"
+    assert isinstance(job_id, str) and job_id.startswith("agent:"), (
+        "expected saved Agent response ID"
+    )
 
     checkpoint = json.loads(checkpoint_path(state_root, operation_id).read_text())
     providers = checkpoint.get("providers", {})
@@ -263,67 +265,76 @@ def test_ext_pplx_bg_submit_async_persists_request_id(
     assert checkpoint["providers"]["perplexity"]["status"] in {"running", "completed"}
 
 
-def test_ext_pplx_bg_cancel_renders_upstream_unsupported(
+def test_ext_pplx_bg_cancel_confirms_upstream_terminal_state(
     live_perplexity_env: tuple[dict[str, str], Path],
 ) -> None:
-    """EXT-PPLX-BG-CANCEL: doxa cancel surfaces upstream_unsupported correctly.
-
-    Perplexity returns {status: upstream_unsupported} from cancel(); the
-    user-facing CLI (cancel.py:126) must render the warning string
-    'upstream cancel not supported; local checkpoint marked cancelled'.
-    This uses a local checkpoint with a synthetic request_id. Perplexity has
-    no cancel endpoint, so submitting a real paid job would add cost without
-    increasing coverage.
-    """
+    """Cancel a real saved Agent ID; distinguish acknowledgment from termination."""
     env, state_root = live_perplexity_env
-    operation_id = "research-20260503-120000-aaaaaaaaaaaaaaaa"
-    checkpoint_file = checkpoint_path(state_root, operation_id)
-    checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
-    checkpoint_file.write_text(
-        json.dumps(
-            {
-                "id": operation_id,
-                "prompt": "synthetic Perplexity cancel checkpoint",
-                "mode": "perplexity_deep_research",
-                "status": "running",
-                "created_at": "2026-05-03T12:00:00",
-                "updated_at": "2026-05-03T12:00:00",
-                "providers": {
-                    "perplexity": {
-                        "status": "running",
-                        "job_id": "req-synthetic-no-upstream-cancel",
-                    }
-                },
-                "output_paths": {},
-                "error": None,
-                "progress": 0.0,
-                "project": None,
-                "input_files": [],
-                "failure_type": None,
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
+    operation_id, _, _ = _submit_perplexity_background_json(
+        env,
+        prompt="Find one authoritative source about HTTP and give one sentence.",
     )
-
-    cancel_result, cancel_elapsed = run_doxa(["cancel", operation_id, "--json"], env, timeout=45)
+    job_id = wait_for_provider_job_id(state_root, operation_id, provider="perplexity", timeout=60.0)
+    assert job_id.startswith("agent:")
+    cancel_result, _ = run_doxa(["cancel", operation_id, "--json"], env, timeout=45)
     assert cancel_result.returncode == 0, cancel_result.stderr + cancel_result.stdout
-    assert cancel_elapsed < 45
     assert_no_secret_leaked(cancel_result, env)
-
     envelope = payload(cancel_result)
     assert envelope["status"] == "ok", envelope
-    data: dict[str, Any] = envelope["data"]
-    assert data["operation_id"] == operation_id
+    data = envelope["data"]
+    if data.get("status") == "already_terminal":
+        assert data.get("previous") == "completed", data
+        acknowledgment = "completed_before_cancel"
+    else:
+        acknowledgment = data["providers"]["perplexity"]["status"]
+        assert acknowledgment in {"cancelling", "cancelled", "completed"}, data
 
-    # Perplexity must surface upstream_unsupported (the runner records the
-    # exact status returned by provider.cancel).
-    perp_status = data["providers"]["perplexity"]["status"]
-    assert perp_status == "upstream_unsupported"
+    receipt = {
+        "operation_id": operation_id,
+        "job_id": job_id,
+        "cancel_acknowledgment": acknowledgment,
+        "upstream_terminal_status": None,
+        "reconciliation": "pending",
+    }
+    receipt_path = state_root / "cancel-terminal-receipt.json"
+    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
 
-    # Local checkpoint must reflect cancelled regardless of upstream support.
-    checkpoint = json.loads(checkpoint_path(state_root, operation_id).read_text())
-    assert checkpoint["status"] == "cancelled"
+    async def observe_terminal() -> str:
+        from doxa_research.config import ConfigManager
+        from doxa_research.providers import create_provider
+
+        config = ConfigManager(
+            config_path=Path(env["XDG_CONFIG_HOME"]) / "doxa" / "doxa.config.toml"
+        )
+        config.load_all_layers({})
+        provider = create_provider(
+            "perplexity",
+            config,
+            mode_config=config.get_mode_config("perplexity_deep_research"),
+        )
+        try:
+            await provider.reconnect(job_id)
+            for _ in range(12):
+                result = await provider.check_status(job_id)
+                status = result["status"]
+                receipt["last_observed_status"] = status
+                if status in {"cancelled", "completed"}:
+                    receipt.update(upstream_terminal_status=status, reconciliation="terminal")
+                    return status
+                assert status not in {"permanent_error", "failed"}, result
+                await asyncio.sleep(5)
+            pytest.fail("Agent cancellation remains pending; reconcile the saved response ID")
+        finally:
+            try:
+                await provider._async_http.aclose()
+            finally:
+                try:
+                    await provider.client.close()
+                finally:
+                    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+
+    terminal_status = asyncio.run(asyncio.wait_for(observe_terminal(), timeout=120))
+    assert terminal_status in {"cancelled", "completed"}
 
 
 @pytest.mark.extended_slow
@@ -338,8 +349,8 @@ def test_ext_pplx_bg_blocking_resume_complete_lifecycle(
     the runner's polling loop until COMPLETED. Verifies the output file
     contains the answer + ## Sources + ## Cost sections.
 
-    NOTE: ~$1.32 per run AND 2-15 minutes wall-clock (sonar-deep-research
-    typical completion time). Set DOXA_EXTENDED_SLOW=1 to opt in.
+    This creates one bounded Agent background response. The subprocess has
+    a 25-minute deadline. Set DOXA_EXTENDED_SLOW=1 to opt in.
     """
     if os.environ.get("DOXA_EXTENDED_SLOW") != "1":
         pytest.skip("set DOXA_EXTENDED_SLOW=1 to run the completion lifecycle test")
@@ -365,7 +376,12 @@ api_key = "${{PERPLEXITY_API_KEY}}"
 
 [execution]
 poll_interval = 10
-max_wait = 30
+max_wait = 25
+
+[modes.perplexity_deep_research.perplexity]
+preset = "high"
+max_steps = 10
+max_output_tokens = 8192
 """,
         encoding="utf-8",
     )
@@ -379,10 +395,7 @@ max_wait = 30
         extra_args=["--config", str(config_path), "--project", project],
     )
 
-    # Resume blocks until completion. 25 min budget covers the typical
-    # 2-15 min lifecycle plus headroom for the documented async polling
-    # delay bug (research §17).
-    deadline = time.monotonic()  # noqa: F841 (left for future budget tracking)
+    # Resume the saved ID once. Fixture finalization also runs after timeout.
     resume_result, _resume_elapsed = run_doxa(
         ["resume", operation_id, "--config", str(config_path), "--quiet"],
         env,
@@ -402,7 +415,7 @@ max_wait = 30
     assert f"operation_id: {operation_id}" in text
     assert "provider: perplexity" in text
     assert "mode: perplexity_deep_research" in text
-    # The async API output must include cost (always-on per Open Question
-    # resolution at P27 kickoff).
-    assert "## Cost" in text, "expected ## Cost footer in output"
-    assert "Total: $" in text
+    assert "## Sources" in text, "grounded Agent completion must retain sources"
+    # Cost is optional in the upstream schema. Retain it when actually reported.
+    if "## Cost" in text:
+        assert "Total: $" in text

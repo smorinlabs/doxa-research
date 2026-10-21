@@ -89,8 +89,8 @@ def test_perplexity_reasoning_builtin_mode_present() -> None:
 def test_perplexity_deep_research_builtin_mode_present() -> None:
     """P27-TS01: BUILTIN_MODES['perplexity_deep_research'] -> sonar-deep-research/background/high.
 
-    Locked at P27 kickoff: reasoning_effort = "high" (~$1.32/query). The mode
-    targets the async API (POST /v1/async/sonar). `kind: "background"` is
+    The legacy model name selects Agent preset high. The mode
+    targets the Agent API (POST /v1/agent). `kind: "background"` is
     required so the runner routes to the polling lifecycle, not the immediate
     `chat.completions` path that P23's other modes use.
     """
@@ -102,7 +102,8 @@ def test_perplexity_deep_research_builtin_mode_present() -> None:
     assert mode["model"] == "sonar-deep-research"
     assert mode["kind"] == "background"
     perp = cast(dict[str, Any], mode.get("perplexity") or {})
-    assert perp.get("reasoning_effort") == "high"
+    assert perp.get("preset") == "high"
+    assert "reasoning_effort" not in perp
 
 
 # ---------------------------------------------------------------------------
@@ -270,10 +271,11 @@ def test_perplexity_response_format_reaches_sync_and_async_request_shapes() -> N
     )
 
     sync_params = provider._build_request_params("prompt", None)
-    async_body = provider._build_async_request_body("prompt", None, "idem-test")
+    from doxa_research.errors import ProviderError
 
+    with pytest.raises(ProviderError, match="json_schema"):
+        provider._build_agent_request_body("prompt", None)
     assert sync_params["response_format"] == {"type": "json_object"}
-    assert async_body["request"]["response_format"] == {"type": "json_object"}
 
 
 def test_perplexity_extra_body_reaches_sync_extra_body_and_async_request() -> None:
@@ -283,10 +285,11 @@ def test_perplexity_extra_body_reaches_sync_extra_body_and_async_request() -> No
     )
 
     sync_params = provider._build_request_params("prompt", None)
-    async_body = provider._build_async_request_body("prompt", None, "idem-test")
+    from doxa_research.errors import ProviderError
 
+    with pytest.raises(ProviderError, match="new_vendor_flag"):
+        provider._build_agent_request_body("prompt", None)
     assert sync_params["extra_body"]["new_vendor_flag"] is True
-    assert async_body["request"]["extra_body"]["new_vendor_flag"] is True
 
 
 # ---------------------------------------------------------------------------

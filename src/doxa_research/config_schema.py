@@ -235,9 +235,9 @@ class PerplexityConfig(ProviderConfigBase):
 
     - Top-level direct SDK keys: `top_p`, `stop`, `response_format`
       (joined with the inherited `temperature`, `max_tokens`).
-    - `perplexity` nested namespace: forwarded verbatim to the SDK's
-      `extra_body` (e.g. `web_search_options.search_context_size`,
-      `stream_mode`). Modeled as a permissive `dict[str, Any]` because
+    - `perplexity` nested namespace: immediate options use SDK `extra_body`;
+      background options are translated into the supported Agent API fields.
+      Agent preset, reasoning and search overrides are validated before HTTP. Modeled as a permissive `dict[str, Any]` because
       Perplexity's namespace evolves with their API and we don't want
       schema drift to block valid user configs.
 

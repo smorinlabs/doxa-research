@@ -218,9 +218,9 @@ BUILTIN_MODES = {
         "model": "sonar-deep-research",
         "kind": "background",
         "system_prompt": None,
-        "description": "Perplexity Sonar Deep Research — multi-step research via async API. ~$1.32/query at reasoning_effort=high.",
+        "description": "Perplexity Agent background research using preset high; sonar-deep-research is a compatibility alias.",
         "perplexity": {
-            "reasoning_effort": "high",
+            "preset": "high",
         },
     },
     # P24: Gemini built-in immediate (synchronous) modes.

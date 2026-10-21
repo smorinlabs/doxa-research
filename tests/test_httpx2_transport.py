@@ -79,14 +79,14 @@ def test_perplexity_async_wire_keeps_raw_endpoint_payload_and_auth() -> None:
             transport=httpx2.MockTransport(respond),
         )
         try:
-            response = await provider._submit_async_with_retry(
-                {"request": {"model": "sonar-deep-research", "messages": []}}
+            response = await provider._submit_agent_once(
+                {"input": "query", "preset": "high", "background": True}
             )
             assert response.json()["id"] == "job_transport"
             assert len(requests) == 1
-            assert requests[0].url.path == "/v1/async/sonar"
+            assert requests[0].url.path == "/v1/agent"
             assert requests[0].headers["authorization"] == "Bearer pplx-placeholder"
-            assert b'"model":"sonar-deep-research"' in requests[0].content
+            assert b'"preset":"high"' in requests[0].content
         finally:
             await provider.client.close()
             await provider._async_http.aclose()
