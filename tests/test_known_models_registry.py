@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from doxa_research.config import BUILTIN_MODES
+from doxa_research.config import BACKGROUND_MODELS, BUILTIN_MODES
 from doxa_research.errors import DoxaError
 from doxa_research.models import KNOWN_MODELS, ModelSpec, derive_known_models
 
@@ -46,7 +46,10 @@ def test_every_builtin_appears_in_known_models() -> None:
             continue
         if cfg.get("provider") is None and isinstance(cfg.get("providers"), list):
             continue
-        triple = (cfg["provider"], cfg["model"], cfg["kind"])
+        kind = cfg["kind"]
+        if cfg["provider"] == "openai" and cfg["model"] in BACKGROUND_MODELS:
+            kind = "background"
+        triple = (cfg["provider"], cfg["model"], kind)
         assert triple in triples, f"Builtin {name!r} triple {triple} missing from KNOWN_MODELS"
 
 
@@ -76,3 +79,12 @@ def test_derive_raises_on_missing_required_fields() -> None:
     broken = {"oops": {"provider": "openai", "model": "o3"}}  # no kind
     with pytest.raises(DoxaError, match="missing"):
         derive_known_models(broken)
+
+
+@pytest.mark.parametrize("kinds", [("immediate", "background"), ("background", "immediate")])
+def test_dual_mode_model_keeps_background_discovery_default(kinds: tuple[str, str]) -> None:
+    modes = {
+        str(i): {"provider": "openai", "model": "gpt-5.6-sol", "kind": kind}
+        for i, kind in enumerate(kinds)
+    }
+    assert derive_known_models(modes) == [ModelSpec("gpt-5.6-sol", "openai", "background")]

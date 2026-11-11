@@ -428,7 +428,7 @@ def test_openai_reasoning_builtin_mode_enables_reasoning_and_web_search() -> Non
 
     mode = BUILTIN_MODES["openai_reasoning"]
     assert mode["provider"] == "openai"
-    assert mode["model"] == "o3"
+    assert mode["model"] == "gpt-5.6-sol"
     assert mode["kind"] == "immediate"
     assert mode["openai"] == {"reasoning_summary": "auto", "web_search": True}
 
