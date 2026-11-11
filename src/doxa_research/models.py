@@ -39,7 +39,9 @@ def derive_known_models(builtin_modes: dict[str, dict[str, Any]] | None = None) 
     Every `(provider, model)` pair referenced by any non-alias builtin is a
     "known" model. Cross-mode kind conflicts (same `(provider, model)` declared
     with two different kinds across builtins) raise `DoxaError` — that
-    indicates a doxa-research bug, not a user-config issue.
+    indicates a doxa-research bug, not a user-config issue. Explicitly registered
+    OpenAI background-capable models that also support streaming are the
+    exception: retain their background discovery default, not the mode kind.
 
     Alias stubs (entries carrying `_deprecated_alias_for`) are skipped because
     they delegate to a real mode and don't carry provider/model/kind themselves.
@@ -48,7 +50,11 @@ def derive_known_models(builtin_modes: dict[str, dict[str, Any]] | None = None) 
     calls with no argument to read the real `BUILTIN_MODES`.
     """
     # Lazy import to dodge the config.py ↔ models.py circular at module load.
-    from doxa_research.config import BUILTIN_MODES
+    from doxa_research.config import (
+        BACKGROUND_MODELS,
+        BUILTIN_MODES,
+        requires_background_submission,
+    )
     from doxa_research.errors import DoxaError
 
     modes = builtin_modes if builtin_modes is not None else BUILTIN_MODES
@@ -80,6 +86,14 @@ def derive_known_models(builtin_modes: dict[str, dict[str, Any]] | None = None) 
         # ty cannot narrow `dict.get` returns through tuple-membership; the
         # `not in (...)` guard above already excludes everything else.
         kind = cast(Literal["immediate", "background"], kind_raw)
+        # A general-purpose model may back both immediate and research modes.
+        # Registry kind is its discovery default; each mode retains its own kind.
+        if (
+            provider == "openai"
+            and model in BACKGROUND_MODELS
+            and not requires_background_submission(model)
+        ):
+            kind = "background"
         key = (provider, model)
         if key in seen and seen[key].kind != kind:
             raise DoxaError(

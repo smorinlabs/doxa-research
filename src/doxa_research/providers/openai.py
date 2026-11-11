@@ -303,8 +303,8 @@ class OpenAIProvider(ResearchProvider):
     def __init__(self, api_key: str, config: dict[str, Any] | None = None):
         self.api_key = api_key
         self.config = config or {}
-        # Model will be passed from mode configuration, default to o3
-        self.model = self.config.get("model", "o3")
+        # Use the supported replacement for o3 when no mode supplies a model.
+        self.model = self.config.get("model", "gpt-5.6-sol")
         self.jobs: dict[str, dict[str, Any]] = {}  # Store job information for async tracking
         self.model_cache = ModelCache(_PROVIDER_NAME_OPENAI)  # Initialize cache for OpenAI
 
