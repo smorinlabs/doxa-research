@@ -30,7 +30,7 @@ idna==3.20
     #   httpx2
 jiter==0.17.0
     # via openai
-markdown-it-py==4.2.0
+markdown-it-py==4.3.0
     # via rich
 mdurl==0.1.2
     # via markdown-it-py
@@ -65,5 +65,5 @@ typing-extensions==4.16.0
     #   typing-inspection
 typing-inspection==0.4.4
     # via pydantic
-wcwidth==0.8.4
+wcwidth==0.9.4
     # via prompt-toolkit
