@@ -4,8 +4,8 @@
 - **Trunk:** [PROJECTS.md](../PROJECTS.md)
 - **Audit:** CI speed review of 2026-11-22 (12 PR runs of `ci.yml`, 2026-10-21 to 2026-11-18)
 
-**Status:** `[~]` PR #200 merged as `7528cea`; post-merge checks passed. The pytest job
-is in a follow-up PR.
+**Status:** `[x]` PR #200 merged as `7528cea`; post-merge checks passed. The pytest
+job is added in PR #202.
 
 **Goal:** Cut PR CI queue time and stop Dependabot from opening several PRs at once.
 
@@ -39,7 +39,10 @@ yamllint, and observed CI and Dependabot runs.
       with the new definition and opened one grouped PR, #201.
 - [x] [P45-T04] Close the ten old-style Dependabot PRs that #201 supersedes
       (#185, #187, #190-#193, #196-#199), each with a comment.
-- [ ] [P45-T05] Add a `pytest` job to `ci.yml`: Ubuntu, Python 3.13,
+- [x] [P45-T05] Add a `pytest` job to `ci.yml`: Ubuntu, Python 3.13,
       `uv run --frozen pytest -n auto -q`, outside the macOS matrix.
-- [ ] [P45-TS05] The pytest job passes in PR CI with 1,862 tests; record its
-      duration and whether it lengthens the critical path.
+- [x] [P45-TS05] The pytest job passes in PR CI with 1,862 tests; record its
+      duration and whether it lengthens the critical path. PR #202 run
+      45222325939: 1,862 passed in 51.4 s; the job took 65 s. The macOS test
+      job (88 s) stays the critical path. The first run exposed a missing
+      `just` binary on Ubuntu, fixed by `extractions/setup-just`.
