@@ -58,7 +58,7 @@ jobs:
       !inputs.migration_acceptance && !inputs.reconcile_existing_jobs
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           python-version: "3.11"
           enable-cache: true
@@ -101,7 +101,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           python-version: '3.11'
           enable-cache: true
@@ -200,7 +200,7 @@ jobs:
           PYCODE
       - name: Retain pre-paid selection manifest
         if: steps.preflight.outcome == 'success'
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: migration-${{ github.sha }}-selection
           path: ${{ runner.temp }}/migration-selection.json
@@ -221,7 +221,7 @@ jobs:
         scope: [extended, live_api, complete_openai, complete_perplexity, complete_gemini]
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           python-version: '3.11'
           enable-cache: true
@@ -368,7 +368,7 @@ jobs:
             --expected-count "$expected"
       - name: Retain sanitized per-test outcomes and operation IDs
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: migration-${{ github.sha }}-${{ matrix.scope }}
           path: ${{ runner.temp }}/migration-acceptance-sanitized/${{ matrix.scope }}
@@ -383,7 +383,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           python-version: '3.11'
           enable-cache: true
@@ -408,7 +408,7 @@ jobs:
           --output-dir "$RUNNER_TEMP/job-observation"
       - name: Retain sanitized one-shot observation
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: job-observation-${{ github.sha }}
           path: ${{ runner.temp }}/job-observation
