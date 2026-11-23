@@ -29,7 +29,7 @@ yamllint, and observed CI and Dependabot runs.
 - [x] [P45-T03] Find why the multi-ecosystem group still opened separate PRs, and
       remove `open-pull-requests-limit` from both grouped entries.
 - [x] [P45-TS01] actionlint and yamllint pass; both `include` JSON literals parse.
-- [ ] [P45-TS02] The PR run shows 3 Ubuntu test jobs and 1 macOS test job.
+- [x] [P45-TS02] The PR run shows 3 Ubuntu test jobs and 1 macOS test job.
 - [ ] [P45-TS03] After merge: the `main` push run shows all 6 test jobs.
 - [ ] [P45-TS04] After merge: the next Dependabot updater job definition shows
       `"multi-ecosystem-update": true` and the `all-dependencies` group, and the
