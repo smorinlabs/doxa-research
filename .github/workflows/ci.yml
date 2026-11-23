@@ -114,6 +114,9 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
+      # tests/test_build_tooling.py runs `just --dry-run` to pin the
+      # justfile's recipes; ubuntu-latest does not ship `just`.
+      - uses: extractions/setup-just@v4
       - name: Run pytest
         run: uv run --frozen pytest -n auto -q
 
