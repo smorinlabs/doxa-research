@@ -101,6 +101,22 @@ jobs:
           head: ${{ github.event.pull_request.head.sha || github.sha }}
           extra_args: --results=verified,unknown
 
+  # The pytest suite (tests/). addopts in pyproject.toml deselects the
+  # real-API `extended` and `live_api` markers; those run on cron in
+  # extended.yml and live-api.yml. One Ubuntu job: the ./doxa_test matrix
+  # below already covers OS and Python-version behavior.
+  pytest:
+    name: Pytest (Python 3.13 on ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Run pytest
+        run: uv run --frozen pytest -n auto -q
+
   test:
     name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
