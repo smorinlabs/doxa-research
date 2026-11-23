@@ -1,5 +1,12 @@
 # One weekly routine-update PR across Python and GitHub Actions.
 # Wildcards include all dependency types and major, minor, and patch updates.
+#
+# Do not set `open-pull-requests-limit` on an entry that joins a
+# multi-ecosystem group. With that key present, GitHub kept running the
+# previous per-ecosystem config (old group names,
+# `multi-ecosystem-update: false` in the updater job definition) and opened
+# separate PRs. Every smorinlabs repo with the key showed this; every repo
+# without it got one combined PR. One weekly PR needs no limit.
 version: 2
 
 multi-ecosystem-groups:
@@ -16,7 +23,6 @@ updates:
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: "all-dependencies"
-    open-pull-requests-limit: 10
     labels:
       - "dependencies"
     # Retain the existing buffer against newly released broken versions.
@@ -31,7 +37,6 @@ updates:
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: "all-dependencies"
-    open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "github-actions"
