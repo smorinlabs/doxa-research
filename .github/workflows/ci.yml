@@ -106,9 +106,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # Pull requests run every Python version on Ubuntu plus one macOS
+      # cell (the newest supported Python). Pushes to main run the full
+      # 3 x 2 matrix. Three macOS jobs per PR exceeded the org's 5-job
+      # macOS concurrency limit whenever several PRs opened together,
+      # so macOS jobs queued for minutes. Both event paths use the same
+      # `include` mechanism so each one is exercised the same way.
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
         python-version: ["3.11", "3.12", "3.13"]
+        include: >-
+          ${{ fromJSON(github.event_name == 'pull_request'
+          && '[{"os":"macos-latest","python-version":"3.13"}]'
+          || '[{"os":"macos-latest","python-version":"3.11"},
+          {"os":"macos-latest","python-version":"3.12"},
+          {"os":"macos-latest","python-version":"3.13"}]') }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.1.0
