@@ -407,7 +407,7 @@ same namespace:
 ```toml
 [modes.my_openai_reasoning]
 provider = "openai"
-model = "o3"
+model = "gpt-5.6-sol"
 kind = "immediate"
 
 [modes.my_openai_reasoning.openai]

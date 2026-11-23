@@ -42,7 +42,7 @@ def test_builtin_mode_fields_populated(isolated_doxa_home: Path) -> None:
     default = next(m for m in modes if m.name == "default")
     assert default.source == "builtin"
     assert default.providers == ["openai"]
-    assert default.model == "o3"
+    assert default.model == "gpt-5.6-sol"
     assert default.kind == "immediate"
     assert default.overrides == {}
 
@@ -272,7 +272,7 @@ def test_modes_detail_builtin(isolated_doxa_home: Path, capsys: pytest.CaptureFi
     assert rc == 0
     assert "Mode: default" in out
     assert "Source: builtin" in out
-    assert "Model: o3" in out
+    assert "Model: gpt-5.6-sol" in out
     assert "Kind: immediate" in out
 
 
@@ -378,14 +378,14 @@ def test_doxa_modes_subprocess_json_flag_reaches_subcommand(
     assert len(data["modes"]) >= 10
     thinking = next(m for m in data["modes"] if m["name"] == "thinking")
     assert thinking["kind"] == "immediate"
-    assert thinking["model"] == "o3"
+    assert thinking["model"] == "gpt-5.6-sol"
 
 
 def test_doxa_modes_subprocess_name_flag(isolated_doxa_home: Path) -> None:
     rc, out, err = run_doxa(["modes", "list", "--name", "thinking"])
     assert rc == 0, f"stderr: {err}"
     assert "Mode: thinking" in out
-    assert "Model: o3" in out
+    assert "Model: gpt-5.6-sol" in out
     assert "Kind: immediate" in out
 
 

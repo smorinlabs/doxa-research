@@ -54,7 +54,7 @@ _config_path: Path | None = None
 BUILTIN_MODES = {
     "default": {
         "provider": "openai",
-        "model": "o3",
+        "model": "gpt-5.6-sol",
         "kind": "immediate",
         "system_prompt": None,
         "description": "Default mode - passes prompt directly to LLM without any system prompt",
@@ -62,7 +62,7 @@ BUILTIN_MODES = {
     },
     "clarification": {
         "provider": "openai",
-        "model": "o3",
+        "model": "gpt-5.6-sol",
         "kind": "immediate",
         "system_prompt": """I don't want you to follow the above question and instructions; I want you to tell me the ways this is unclear, point out any ambiguities or anything you don't understand. Follow that by asking questions to help clarify the ambiguous points. Once there are no more unclear, ambiguous or not understood portions, help me draft a clear version of the question/instruction.""",
         "description": "Clarifying takes the prompt to get. Ask clarifying questions to get rid of anything that's ambiguous, unclear, and also make suggestions on what would be a better question.",
@@ -143,7 +143,7 @@ BUILTIN_MODES = {
     },
     "thinking": {
         "provider": "openai",
-        "model": "o3",
+        "model": "gpt-5.6-sol",
         "kind": "immediate",
         "temperature": 0.4,
         "system_prompt": "You are a helpful assistant for quick analysis.",
@@ -151,10 +151,10 @@ BUILTIN_MODES = {
     },
     "openai_reasoning": {
         "provider": "openai",
-        "model": "o3",
+        "model": "gpt-5.6-sol",
         "kind": "immediate",
         "system_prompt": "You are a helpful assistant for quick, grounded analysis.",
-        "description": "OpenAI o3 immediate mode with reasoning summaries and web search grounding.",
+        "description": "OpenAI GPT-5.6 Sol immediate mode with reasoning summaries and web search grounding.",
         "openai": {
             "reasoning_summary": "auto",
             "web_search": True,
