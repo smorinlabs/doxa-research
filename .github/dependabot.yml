@@ -1,4 +1,7 @@
-# One weekly routine-update PR across Python and GitHub Actions.
+# One weekly routine-update PR across Python (uv) and GitHub Actions.
+# The `uv` ecosystem rewrites uv.lock with pyproject.toml. The old `pip`
+# ecosystem changed only pyproject pins, so CI (`uv sync --frozen`) never
+# tested the new versions.
 # Wildcards include all dependency types and major, minor, and patch updates.
 #
 # Do not set `open-pull-requests-limit` on an entry that joins a
@@ -19,7 +22,7 @@ multi-ecosystem-groups:
       prefix: "deps"
 
 updates:
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: "all-dependencies"
