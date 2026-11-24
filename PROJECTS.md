@@ -72,7 +72,7 @@ Older entries may use `**Primary spec**`, `**Plan**`, or
 <!-- Descending P-number order. Scoped / in-progress / done first;
      ideas last. One row per file; one file per row. -->
 
-- [~] **P45** — [One macOS CI Job per PR, and Working Dependabot Grouping](projects/P45-ci-macos-pr-and-dependabot.md)
+- [x] **P45** — [One macOS CI Job per PR, and Working Dependabot Grouping](projects/P45-ci-macos-pr-and-dependabot.md)
 - [~] **P44** — [Perplexity Agent API Migration](projects/P44-perplexity-agent-api.md)
 - [~] **P43** — [httpx2 Migration (Unblocks the openai 3.x Upgrade)](projects/P43-httpx2-migration-openai-3x.md)
 - [~] **P42** — [Shorten the Doxa Skill Description to Action-Scoped Triggers](projects/P42-doxa-skill-description.md)
